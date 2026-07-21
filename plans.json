@@ -1,0 +1,238 @@
+[
+    {
+        "name": "divide_combine",
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "divide",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                    "logic_combine",
+                    "stack_combine",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                   "generate_all_color_combos",
+                   "no_change"
+                ]
+            }
+            
+        ]
+    },
+    {
+        "name": "reflections",
+        "pre_info_gathering": [
+            "input_dimensions"
+        ],
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "crop_to_content",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                    "reflection",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                    "concat_all_combos"
+                ]
+            },
+            {
+                "num_times": 0,
+                "transformations": [
+                    "reflection",
+                    "concat_all_combos",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 0,
+                "transformations": [
+                    "crop_to_m_n_of_input_dim",
+                    "no_change"
+                ]
+            }
+        ]
+    },
+    {
+        "name": "draw_lines_between_blobs",
+        "pre_info_gathering": [
+            "find_blobs"
+        ],
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "dialate",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 4,
+                "transformations": [
+                    "draw_line_between_points",
+                    "no_change"
+                ]
+            }
+
+        ]
+    },
+    {
+        "name": "draw_lines_drawable_directions",
+        "transformation_rounds": [
+            {
+                "num_times": 2,
+                "transformations": [
+                    "draw_drawable_lines",
+                    "no_change"
+                ]
+            }
+        ]
+    },
+    {
+        "name": "gravity",
+        "transformation_rounds": [
+            {
+                "num_times": 10,
+                "transformations": [
+                    "apply_gravity",
+                    "no_change"
+                ]
+            }
+        ]
+    },
+    {
+        "name": "make_graph",
+        "pre_info_gathering": [
+            "find_blobs",
+            "count_colors"
+        ],
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "make_graph",
+                    "no_change"
+                ]
+            }
+        ]
+    },
+    {
+        "name": "transform_blobs",
+        "pre_info_gathering":[
+            "find_blobs"
+        ],
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "fill_blobs",
+                    "recolor_donuts",
+                    "no_change"
+                ]
+            }
+
+        ]
+    },
+    {
+        "name": "blob_reflections",
+        "pre_info_gathering": [
+            "find_blobs"
+        ],
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "reflect_over_lines",
+                    "remove_touching",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                    "reflect_over_lines",
+                    "remove_touching",
+                    "no_change"
+                ]
+            }
+        ]
+    },
+    {
+        "name": "dialate_inscribe",
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "dialate",
+                    "inscribe",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                   "generate_all_color_combos",
+                   "palette_rotation",
+                   "no_change"
+                ]
+            }
+        ]
+    },
+    {
+        "name": "general",
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "crop_to_content",
+                   "crop_one_off_each_side",
+                   "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                    "rotation",
+                   "reflection",
+                   "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                   "palette_rotation",
+                   "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                   "apply_original_input",
+                   "generate_all_color_combos",
+                   "no_change"
+                ]
+            }
+        ]
+    },
+    {
+        "name": "every_end",
+        "transformation_rounds": []
+    }
+]

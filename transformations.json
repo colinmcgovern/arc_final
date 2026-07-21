@@ -1,0 +1,159 @@
+[
+    {
+        "name": "reflection",
+        "parameters": [],
+        "canBeBackToBack": false,
+        "unique_output_tags": []
+    },
+    {
+        "name": "rotation",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "extract_blobs",
+        "parameters": [],
+        "canBeBackToBack": false,
+        "unique_output_tags": []
+    },
+    {
+        "name": "divide",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "triple_divide",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "dialate",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": ["matches_input_color"]
+    },
+    {
+        "name": "inscribe",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": ["matches_input_color"]
+    },
+    {
+        "name": "draw_line_between_points",
+        "parameters": ["list_of_coords"],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "draw_drawable_lines",
+        "parameters": ["list_of_coords"],
+        "canBeBackToBack": true,
+        "unique_output_tags": ["origin_color", "dest_color", "endpoints_same_color"]
+    },
+    {
+        "name": "logic_combine",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "stack_combine",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "apply_gravity",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": ["attracted_to_same_color"]
+    },
+    {
+        "name": "scaling",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "crop_to_content",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "crop_one_off_each_side",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    }
+    ,
+    {
+        "name": "no_change",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "concat_all_combos",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "crop_to_m_n_of_input_dim",
+        "parameters": ["m_n_of_input_dim"],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "make_graph",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "fill_blobs",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": ["matches_input_color"]
+    },
+    {
+        "name": "recolor_donuts",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "reflect_over_lines",
+        "parameters": ["list_of_blobs"],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "remove_touching",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "apply_original_input",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "generate_all_color_combos",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    },
+    {
+        "name": "palette_rotation",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
+    }
+]

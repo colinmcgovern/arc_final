@@ -1,0 +1,416 @@
+from collections import Counter
+
+import numpy as np
+from scipy import ndimage
+
+from ArcProblem import ArcProblem
+from ArcData import ArcData
+from ArcSet import ArcSet
+from runPlan import runPlan, iter_nodes_with_paths, get_node_at_path
+
+TAG_FALLBACK_CANDIDATES_PER_PLAN = 3
+
+_BLOB_STRUCT = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+
+
+def makePlanAssignments(
+    outputHasMoreLines,
+    isDivisionCombine,
+    possibleReflection,
+    possibleBlobReflection
+):
+    print("outputHasMoreLines", outputHasMoreLines)
+    print("isDivisionCombine", isDivisionCombine)
+    print("possibleReflection", possibleReflection)
+    print("possibleBlobReflection", possibleBlobReflection)
+    plansToExecute = []
+    if (
+        outputHasMoreLines == False and
+        isDivisionCombine == False and
+        possibleReflection == False and
+        possibleBlobReflection == False
+    ):
+        plansToExecute.append("general")
+        plansToExecute.append("dialate_inscribe")
+        # plansToExecute.append("general")
+        # # plansToExecute.append("gravity")
+        # # plansToExecute.append("make_graph")
+        # # plansToExecute.append("transform_blobs")
+        # plansToExecute.append("dialate_inscribe")
+    if outputHasMoreLines == True:
+        # plansToExecute.append("general")
+        # plansToExecute.append("dialate_inscribe")
+        # plansToExecute.append("draw_lines_between_blobs")
+        plansToExecute.append("draw_lines_drawable_directions")
+        plansToExecute.append("general")
+        plansToExecute.append("dialate_inscribe")
+    if isDivisionCombine == True:
+        plansToExecute.append("divide_combine")
+    if possibleReflection == True:
+        plansToExecute.append("general")
+        plansToExecute.append("dialate_inscribe")
+        plansToExecute.append("reflections")
+    if possibleBlobReflection == True:
+        plansToExecute.append("blob_reflections")
+    print("plansToExecute", plansToExecute)    
+    return plansToExecute
+
+
+def _count_lines(matrix: np.ndarray) -> int:
+    """
+    Counts drawable line-runs (horizontal, vertical, and both diagonal
+    directions) of length >= 3 whose color differs from the majority
+    color on either side of the run.
+    Ported from countLines in OLD_ArcAgent.py.
+    """
+    def majority_color(cells):
+        if not cells:
+            return None
+        color, cnt = Counter(cells).most_common(1)[0]
+        return color if cnt * 2 > len(cells) else None
+
+    def count_runs(seq):
+        n, i = 0, 0
+        while i < len(seq):
+            if seq[i] != 0:
+                j = i + 1
+                while j < len(seq) and seq[j] == seq[i]:
+                    j += 1
+                line_color = seq[i]
+                lc = majority_color(list(seq[:i]))
+                rc = majority_color(list(seq[j:]))
+                if lc is not None and rc is not None:
+                    bg_ok = lc == rc and lc != line_color
+                elif lc is not None:
+                    bg_ok = lc != line_color
+                elif rc is not None:
+                    bg_ok = rc != line_color
+                else:
+                    bg_ok = True
+                if j - i >= 3 and bg_ok:
+                    n += 1
+                i = j
+            else:
+                i += 1
+        return n
+
+    matrix = np.array(matrix)
+    rows, cols = matrix.shape
+    h = sum(count_runs(matrix[r, :]) for r in range(rows))
+    v = sum(count_runs(matrix[:, c]) for c in range(cols))
+    d1 = sum(count_runs(np.diag(matrix, d)) for d in range(-(rows - 1), cols))
+    flipped = np.fliplr(matrix)
+    d2 = sum(count_runs(np.diag(flipped, d)) for d in range(-(rows - 1), cols))
+    return h + v + d1 + d2
+
+
+def findIfOutputsHasMoreLines(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if the training outputs contain drawable lines
+    that aren't present in the corresponding inputs (i.e. the
+    "draw_lines_between_blobs" / "draw_lines_drawable_directions"
+    plans are worth attempting).
+    """
+    return any(
+        _count_lines(example.get_output_data().data()) > _count_lines(example.get_input_data().data())
+        for example in arc_problem.training_set()
+    )
+
+
+def _is_divider_line_set(arc_set: ArcSet) -> bool:
+    input_shape = arc_set.get_input_data().shape()
+    output_shape = arc_set.get_output_data().shape()
+    input_rows, input_cols = input_shape[0], input_shape[1]
+    output_rows, output_cols = output_shape[0], output_shape[1]
+    row_halved = (abs(input_rows // 2 - output_rows) <= 1) and (input_cols == output_cols) and (output_rows > 0)
+    col_halved = (input_rows == output_rows) and (abs(input_cols // 2 - output_cols) <= 1) and (output_cols > 0)
+    return row_halved or col_halved
+
+
+def findIfIsDivisionCombine(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if the training examples look like a
+    divide-then-combine problem (input splits into sections that
+    get logically/stacked-combined into the output).
+    """
+    return all(_is_divider_line_set(example) for example in arc_problem.training_set())
+
+def _is_x_subset_of_y(input_matrix: np.ndarray, output_matrix: np.ndarray) -> bool:
+    nonzero_rows, nonzero_cols = np.nonzero(input_matrix)
+    if nonzero_rows.size == 0:
+        return False
+    r0, r1 = nonzero_rows.min(), nonzero_rows.max() + 1
+    c0, c1 = nonzero_cols.min(), nonzero_cols.max() + 1
+    cropped = input_matrix[r0:r1, c0:c1]
+
+    in_rows, in_cols = cropped.shape
+    out_rows, out_cols = output_matrix.shape
+
+    if out_rows < in_rows or out_cols < in_cols:
+        return False
+
+    for r in range(out_rows - in_rows + 1):
+        for c in range(out_cols - in_cols + 1):
+            if np.array_equal(output_matrix[r:r + in_rows, c:c + in_cols], cropped):
+                return True
+    return False
+
+
+def findPossibleReflection(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if the output dimensions are a whole-number multiple of
+    the input's (independently per axis) and the input matrix appears
+    unmodified as a contiguous submatrix somewhere in the output (the
+    "reflections" plan).
+
+    Best-effort placeholder heuristic (no OLD_ArcAgent.py equivalent): this
+    is a cheap, permissive gate rather than a strict verification of the
+    reflection pattern - the "reflections" plan itself checks candidate
+    transforms against the real output later.
+    """
+    training = arc_problem.training_set()
+
+    for example in training:
+        print(_is_x_subset_of_y(example.get_input_data().data(), example.get_output_data().data()))
+
+    if not training:
+        return False
+    return all(
+        _is_x_subset_of_y(example.get_input_data().data(), example.get_output_data().data())
+        for example in training
+    )
+
+
+def _connected_component_masks(matrix: np.ndarray) -> list:
+    masks = []
+    for color in np.unique(matrix):
+        if color == 0:
+            continue
+        labeled, n_features = ndimage.label((matrix == color).astype(int), structure=_BLOB_STRUCT)
+        for label_id in range(1, n_features + 1):
+            masks.append(labeled == label_id)
+    return masks
+
+
+def _has_mirrored_blob(input_matrix: np.ndarray, output_matrix: np.ndarray) -> bool:
+    if input_matrix.shape != output_matrix.shape:
+        return False
+
+    input_nonzero = input_matrix != 0
+    if not np.array_equal(output_matrix[input_nonzero], input_matrix[input_nonzero]):
+        return False
+
+    extra_positions = set(zip(*np.where((output_matrix != 0) & ~input_nonzero)))
+    if not extra_positions:
+        return False
+
+    for blob_mask in _connected_component_masks(input_matrix):
+        for flipped in (np.fliplr(blob_mask), np.flipud(blob_mask)):
+            reflected_positions = set(zip(*np.where(flipped)))
+            if reflected_positions and reflected_positions <= extra_positions:
+                return True
+    return False
+
+
+def findPossibleBlobReflection(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if individual blobs in the input appear to be
+    reflected over a line (the "blob_reflections" plan).
+
+    Best-effort placeholder heuristic (no OLD_ArcAgent.py equivalent):
+    same shape as input, every input foreground pixel preserved in the
+    output, and the newly-added output pixels contain a mirrored copy
+    (left-right or up-down) of at least one input blob.
+    """
+    training = arc_problem.training_set()
+    if not training:
+        return False
+    return all(
+        _has_mirrored_blob(example.get_input_data().data(), example.get_output_data().data())
+        for example in training
+    )
+
+
+def performPlan(input_matrix: np.ndarray, plan: str):
+    """
+    Runs the named plan's transformation rounds (see plans.json) against
+    a single input matrix and returns the resulting transform tree
+    (the set of candidate output matrices produced by that plan, tagged
+    with whatever metadata later matching steps need).
+    """
+    return runPlan(input_matrix, plan)
+
+
+def markMatchingOutputs(transformTreesForEveryInputMatrix):
+    """
+    Walks each plan's transform trees and marks which candidate nodes
+    actually matched their training example's real output.
+    """
+    for plan_trees in transformTreesForEveryInputMatrix:
+        for tree, expected_output in plan_trees:
+            for _, node in iter_nodes_with_paths(tree):
+                node.matched = node.result is not None and np.array_equal(node.result, expected_output)
+    return transformTreesForEveryInputMatrix
+
+
+def find_index_matches(transformTreesForEveryInputMatrix):
+    """
+    Returns, for each plan, the transform-tree node index/path that
+    matched the correct output across the training examples.
+    """
+    index_matches = []
+    for plan_trees in transformTreesForEveryInputMatrix:
+        path_sets = [
+            {path for path, node in iter_nodes_with_paths(tree) if node.matched}
+            for tree, _ in plan_trees
+        ]
+        common_paths = set.intersection(*path_sets) if path_sets else set()
+        index_matches.append(sorted(common_paths))
+    return index_matches
+
+
+def find_tag_matches(transformTreesForEveryInputMatrix):
+    """
+    Returns, for each plan, the transformation tags (see
+    transformations.json unique_output_tags) that were shared by
+    matching nodes across the training examples.
+    """
+    tag_matches = []
+    for plan_trees in transformTreesForEveryInputMatrix:
+        tag_sets = []
+        for tree, _ in plan_trees:
+            matched_tags = set()
+            for _, node in iter_nodes_with_paths(tree):
+                if node.matched:
+                    matched_tags.update(f"{k}:{v}" for k, v in node.tags.items())
+            tag_sets.append(matched_tags)
+        common_tags = set.intersection(*tag_sets) if tag_sets else set()
+        tag_matches.append(sorted(common_tags))
+    return tag_matches
+
+
+def applyAndSort(plansAppliedToTestInputMatrix, index_matches, tag_matches) -> list[np.ndarray]:
+    """
+    Uses the index and tag matches found from the training examples to
+    pick out the corresponding candidate matrices from the test input's
+    transform trees, and returns them ordered from highest to lowest
+    predicted quality.
+    """
+    index_tier = []
+    tag_tier = []
+
+    for plan_idx, tree in enumerate(plansAppliedToTestInputMatrix):
+        paths = index_matches[plan_idx] if plan_idx < len(index_matches) else []
+        if paths:
+            for path in paths:
+                node = get_node_at_path(tree, path)
+                if node is not None and node.result is not None:
+                    index_tier.append(node.result)
+            continue
+
+        tags_for_plan = set(tag_matches[plan_idx]) if plan_idx < len(tag_matches) else set()
+        if not tags_for_plan:
+            continue
+
+        scored = []
+        for path, node in iter_nodes_with_paths(tree):
+            if node.result is None:
+                continue
+            node_tags = {f"{k}:{v}" for k, v in node.tags.items()}
+            score = len(node_tags & tags_for_plan)
+            if score > 0:
+                scored.append((score, path, node.result))
+        scored.sort(key=lambda entry: (-entry[0], entry[1]))
+        for _, _, result in scored[:TAG_FALLBACK_CANDIDATES_PER_PLAN]:
+            tag_tier.append(result)
+
+    return index_tier + tag_tier
+
+
+class ArcAgent:
+    def __init__(self):
+        """
+        You may add additional variables to this init method. Be aware that it gets called only once
+        and then the make_predictions method will get called several times.
+        """
+        pass
+
+    def make_predictions(self, arc_problem: ArcProblem) -> list[np.ndarray]:
+
+        # Step 1 - Identify Problem Type
+        outputHasMoreLines = findIfOutputsHasMoreLines(arc_problem)
+        isDivisionCombine = findIfIsDivisionCombine(arc_problem)
+        possibleReflection = findPossibleReflection(arc_problem)
+        possibleBlobReflection = False #findPossibleBlobReflection(arc_problem)
+
+        # Step 2 - Assign Plans According To Problem Type
+        planAssignments = makePlanAssignments(
+            outputHasMoreLines,
+            isDivisionCombine,
+            possibleReflection,
+            possibleBlobReflection
+        )
+
+        # Step 3 - Apply Plans
+        transformTreesForEveryInputMatrix = []
+        for plan in planAssignments:
+
+            transformTreePerPlan = []
+
+            for arc_set in arc_problem.training_set():
+                inputMatrix = arc_set.get_input_data().data()
+                expectedOutput = arc_set.get_output_data().data()
+                transformTreePerPlan.append(
+                    (performPlan(inputMatrix, plan), expectedOutput)
+                )
+
+            transformTreesForEveryInputMatrix.append(transformTreePerPlan)
+
+        # Step 4 - Find Matching Outputs
+        transformTreesForEveryInputMatrix = markMatchingOutputs(transformTreesForEveryInputMatrix)
+
+        for plan_idx, plan in enumerate(planAssignments):
+            for example_idx, (tree, _) in enumerate(transformTreesForEveryInputMatrix[plan_idx]):
+                nodes = list(iter_nodes_with_paths(tree))
+                matched_count = sum(1 for _, node in nodes if node.matched)
+                total_count = sum(1 for _, node in nodes if node.result is not None)
+                print(f"{arc_problem.problem_name()}: plan '{plan}' example {example_idx + 1}: {matched_count}/{total_count} nodes matched")
+
+        # Step 4 - Find index matches
+        index_matches = find_index_matches(transformTreesForEveryInputMatrix)
+        for plan, matches in zip(planAssignments, index_matches):
+            if matches:
+                print(f"{arc_problem.problem_name()}: plan '{plan}' matched output for every example")
+
+        # Step 5 - Find tag matches
+        tag_matches = find_tag_matches(transformTreesForEveryInputMatrix)
+
+        # Step 6 - Case Based Solutions (skipped for now. may implment later)
+
+        # Step 7 - Apply Plans to Test Input
+        testInputMatrix = arc_problem.test_set().get_input_data().data()
+        plansAppliedToTestInputMatrix = []
+        for plan in planAssignments:
+            plansAppliedToTestInputMatrix.append(performPlan(testInputMatrix, plan))
+
+        self.last_test_trees = list(zip(planAssignments, plansAppliedToTestInputMatrix))
+
+        # Step 8 - Apply top matches to plans
+        all_predictions_from_highest_to_lowest_quality = applyAndSort(
+            plansAppliedToTestInputMatrix,
+            index_matches,
+            tag_matches
+        )
+
+        # Step 9 - Take the top 3 unique predictions, padding with the best
+        # guess if fewer than 3 unique candidates were found.
+        predictions: list[np.ndarray] = []
+        for candidate in all_predictions_from_highest_to_lowest_quality:
+            if not any(np.array_equal(candidate, existing) for existing in predictions):
+                predictions.append(candidate)
+            if len(predictions) == 3:
+                break
+        while predictions and len(predictions) < 3:
+            predictions.append(predictions[-1])
+
+        return predictions  # a list[np.ndarray] of size 3
