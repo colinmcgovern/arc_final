@@ -77,29 +77,37 @@ def load_arc_problems(path: str, problem_data: list[str]) -> list[ArcProblem]:
 
 if __name__ == "__main__":
 
-    # // del - set to a problem hash (e.g. "00576224") to test only that problem, or None to run all
-    # TEST_PROBLEM_HASH = "22eb0ac0"
-    # TEST_PROBLEM_HASH = "25d487eb"
-    # TEST_PROBLEM_HASH = "3de23699"
-    # TEST_PROBLEM_HASH = "cf98881b"
-    # TEST_PROBLEM_HASH = "f76d97a5"
-    # TEST_PROBLEM_HASH = "f25ffba3"
+    # // del - set to a list of problem hashes (e.g. ["00576224"]) to test only those problems
+    #  (searched across milestones B, C, and D), or None to run all problems in B, C, and D
+    # TEST_PROBLEM_HASH = ["22eb0ac0", "25d487eb", "3de23699", "cf98881b", "f76d97a5", "f25ffba3"]
+
+    # TEST_PROBLEM_HASH = ["bbb1b8b6", "195ba7dc", "31d5ba1a", "e98196ab", "cf98881b"] # Divide Combine
+    # TEST_PROBLEM_HASH = ["3428a4f5", "f2829549", "6430c8c4", "0520fde7"] # Divide Combine (needs to be generalized to handle n cases)
+    # TEST_PROBLEM_HASH = ["c48954c1", "f25ffba3"] # Reflections
+    # TEST_PROBLEM_HASH = ["992798f6", "f35d900a"] # Draw Lines Between Blobs
+    # TEST_PROBLEM_HASH = ["25d487eb", "5c0a986e"] # Draw Lines Drawable Directions
+    # TEST_PROBLEM_HASH = ["81c0276b"] # Make Graph
+    # TEST_PROBLEM_HASH = ["18419cfa"] # Blob Reflections
+    # TEST_PROBLEM_HASH = ["d931c21c", "ce22a75a"] # Dialate Inscribe
+    # TEST_PROBLEM_HASH = ["4b6b68e5"] # Recolor Frame
+    # TEST_PROBLEM_HASH = ["7b6016b9"] # Recolor Contents Of Frame Then Recolor Background
+    # TEST_PROBLEM_HASH = ["f76d97a5", "ed36ccf7", "b1948b0a", "1cf80156"] # General
+
     TEST_PROBLEM_HASH = None
 
-    # Here you can use this to open other milestone data directories for running against
-    #  change the MILESTONE variable below to 'B', 'C', or 'D'
-    MILESTONE = os.environ.get('MILESTONE', 'C')
-    milestone_path = os.path.join('..', 'Milestone B', 'Milestones', MILESTONE)
-    milestone_data: list[str] = os.listdir(milestone_path)
+    arc_milestone_problems: list[ArcProblem] = []
+    for milestone_letter in ('B', 'C', 'D'):
+        milestone_path = os.path.join('..', 'Milestone B', 'Milestones', milestone_letter)
+        milestone_data: list[str] = os.listdir(milestone_path)
 
-    # // del
-    if TEST_PROBLEM_HASH is not None:
-        milestone_data = [f for f in milestone_data if TEST_PROBLEM_HASH in f]
-        if not milestone_data:
-            print(f"No problem found matching hash: {TEST_PROBLEM_HASH}")
-            exit(1)
+        if TEST_PROBLEM_HASH is not None:
+            milestone_data = [f for f in milestone_data if any(h in f for h in TEST_PROBLEM_HASH)]
 
-    arc_milestone_problems: list[ArcProblem] = load_arc_problems(milestone_path, milestone_data)
+        arc_milestone_problems.extend(load_arc_problems(milestone_path, milestone_data))
+
+    if TEST_PROBLEM_HASH is not None and not arc_milestone_problems:
+        print(f"No problem found matching hashes: {TEST_PROBLEM_HASH}")
+        exit(1)
 
     # instantiate the agent once
     arc_agent: ArcAgent = ArcAgent()
