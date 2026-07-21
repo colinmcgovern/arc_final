@@ -1,4 +1,5 @@
-from collections import Counter
+import os
+import time
 
 import numpy as np
 from scipy import ndimage
@@ -7,6 +8,15 @@ from ArcProblem import ArcProblem
 from ArcData import ArcData
 from ArcSet import ArcSet
 from runPlan import runPlan, iter_nodes_with_paths, get_node_at_path
+from runTransformation import _count_lines_by_direction
+
+ARC_DEBUG = os.environ.get("ARC_DEBUG", "1") != "0"
+
+
+def dbg(msg):
+    if ARC_DEBUG:
+        pass  # print(f"[DEBUG] {msg}")
+
 
 TAG_FALLBACK_CANDIDATES_PER_PLAN = 3
 
@@ -19,10 +29,10 @@ def makePlanAssignments(
     possibleReflection,
     possibleBlobReflection
 ):
-    print("outputHasMoreLines", outputHasMoreLines)
-    print("isDivisionCombine", isDivisionCombine)
-    print("possibleReflection", possibleReflection)
-    print("possibleBlobReflection", possibleBlobReflection)
+    # print("outputHasMoreLines", outputHasMoreLines)
+    # print("isDivisionCombine", isDivisionCombine)
+    # print("possibleReflection", possibleReflection)
+    # print("possibleBlobReflection", possibleBlobReflection)
     plansToExecute = []
     if (
         outputHasMoreLines == False and
@@ -32,27 +42,27 @@ def makePlanAssignments(
     ):
         plansToExecute.append("general")
         plansToExecute.append("dialate_inscribe")
-        # plansToExecute.append("general")
-        # # plansToExecute.append("gravity")
-        # # plansToExecute.append("make_graph")
-        # # plansToExecute.append("transform_blobs")
-        # plansToExecute.append("dialate_inscribe")
-    if outputHasMoreLines == True:
-        # plansToExecute.append("general")
-        # plansToExecute.append("dialate_inscribe")
-        # plansToExecute.append("draw_lines_between_blobs")
+        plansToExecute.append("make_graph")
+    if (
+        outputHasMoreLines == True
+    ):
+        plansToExecute.append("draw_lines_between_blobs")
         plansToExecute.append("draw_lines_drawable_directions")
         plansToExecute.append("general")
-        plansToExecute.append("dialate_inscribe")
-    if isDivisionCombine == True:
+        plansToExecute.append("make_graph")
+    elif (
+        isDivisionCombine == True
+    ):
         plansToExecute.append("divide_combine")
-    if possibleReflection == True:
+    elif (
+        possibleReflection == True
+    ):
         plansToExecute.append("general")
         plansToExecute.append("dialate_inscribe")
         plansToExecute.append("reflections")
     if possibleBlobReflection == True:
         plansToExecute.append("blob_reflections")
-    print("plansToExecute", plansToExecute)    
+    # print("plansToExecute", plansToExecute)
     return plansToExecute
 
 
@@ -63,45 +73,7 @@ def _count_lines(matrix: np.ndarray) -> int:
     color on either side of the run.
     Ported from countLines in OLD_ArcAgent.py.
     """
-    def majority_color(cells):
-        if not cells:
-            return None
-        color, cnt = Counter(cells).most_common(1)[0]
-        return color if cnt * 2 > len(cells) else None
-
-    def count_runs(seq):
-        n, i = 0, 0
-        while i < len(seq):
-            if seq[i] != 0:
-                j = i + 1
-                while j < len(seq) and seq[j] == seq[i]:
-                    j += 1
-                line_color = seq[i]
-                lc = majority_color(list(seq[:i]))
-                rc = majority_color(list(seq[j:]))
-                if lc is not None and rc is not None:
-                    bg_ok = lc == rc and lc != line_color
-                elif lc is not None:
-                    bg_ok = lc != line_color
-                elif rc is not None:
-                    bg_ok = rc != line_color
-                else:
-                    bg_ok = True
-                if j - i >= 3 and bg_ok:
-                    n += 1
-                i = j
-            else:
-                i += 1
-        return n
-
-    matrix = np.array(matrix)
-    rows, cols = matrix.shape
-    h = sum(count_runs(matrix[r, :]) for r in range(rows))
-    v = sum(count_runs(matrix[:, c]) for c in range(cols))
-    d1 = sum(count_runs(np.diag(matrix, d)) for d in range(-(rows - 1), cols))
-    flipped = np.fliplr(matrix)
-    d2 = sum(count_runs(np.diag(flipped, d)) for d in range(-(rows - 1), cols))
-    return h + v + d1 + d2
+    return sum(_count_lines_by_direction(matrix).values())
 
 
 def findIfOutputsHasMoreLines(arc_problem: ArcProblem) -> bool:
@@ -170,8 +142,8 @@ def findPossibleReflection(arc_problem: ArcProblem) -> bool:
     """
     training = arc_problem.training_set()
 
-    for example in training:
-        print(_is_x_subset_of_y(example.get_input_data().data(), example.get_output_data().data()))
+    # for example in training:
+    #     print(_is_x_subset_of_y(example.get_input_data().data(), example.get_output_data().data()))
 
     if not training:
         return False
@@ -289,40 +261,65 @@ def find_tag_matches(transformTreesForEveryInputMatrix):
     return tag_matches
 
 
-def applyAndSort(plansAppliedToTestInputMatrix, index_matches, tag_matches) -> list[np.ndarray]:
+def _pixel_diff_count(input_matrix, result):
+    """
+    Returns the number of differing cells between input_matrix and result,
+    or None if their shapes differ (so pixel-change can't be compared).
+    """
+    if input_matrix is None or result is None or input_matrix.shape != result.shape:
+        return None
+    return int(np.sum(input_matrix != result))
+
+
+def applyAndSort(plansAppliedToTestInputMatrix, index_matches, tag_matches, planAssignments) -> list[tuple[np.ndarray, dict]]:
     """
     Uses the index and tag matches found from the training examples to
     pick out the corresponding candidate matrices from the test input's
-    transform trees, and returns them ordered from highest to lowest
-    predicted quality.
+    transform trees, and returns (matrix, match_info) pairs ordered from
+    highest to lowest predicted quality. match_info records which tier
+    produced the candidate (index or tag) and how it matched (the shared
+    path, or the shared tags).
     """
     index_tier = []
     tag_tier = []
 
     for plan_idx, tree in enumerate(plansAppliedToTestInputMatrix):
+        plan = planAssignments[plan_idx]
         paths = index_matches[plan_idx] if plan_idx < len(index_matches) else []
         if paths:
             for path in paths:
                 node = get_node_at_path(tree, path)
                 if node is not None and node.result is not None:
-                    index_tier.append(node.result)
+                    index_tier.append((node.result, {"match_type": "index", "plan": plan, "path": path}))
             continue
 
         tags_for_plan = set(tag_matches[plan_idx]) if plan_idx < len(tag_matches) else set()
         if not tags_for_plan:
             continue
 
+        input_node = get_node_at_path(tree, ())
+        input_matrix = input_node.result if input_node is not None else None
+
         scored = []
         for path, node in iter_nodes_with_paths(tree):
             if node.result is None:
                 continue
             node_tags = {f"{k}:{v}" for k, v in node.tags.items()}
-            score = len(node_tags & tags_for_plan)
-            if score > 0:
-                scored.append((score, path, node.result))
-        scored.sort(key=lambda entry: (-entry[0], entry[1]))
-        for _, _, result in scored[:TAG_FALLBACK_CANDIDATES_PER_PLAN]:
-            tag_tier.append(result)
+            overlap = node_tags & tags_for_plan
+            if overlap:
+                diff = _pixel_diff_count(input_matrix, node.result)
+                scored.append((len(overlap), path, node.result, sorted(overlap), diff))
+        scored.sort(key=lambda entry: (
+            -entry[0],
+            0 if entry[4] is not None else 1,
+            -entry[4] if entry[4] is not None else 0,
+            entry[1],
+        ))
+        for _, path, result, overlap, diff in scored[:TAG_FALLBACK_CANDIDATES_PER_PLAN]:
+            tag_tier.append((result, {
+                "match_type": "tag", "plan": plan, "path": path,
+                "tags": overlap, "pixels_changed": diff,
+            }))
 
     return index_tier + tag_tier
 
@@ -352,9 +349,11 @@ class ArcAgent:
         )
 
         # Step 3 - Apply Plans
+        step3_start = time.perf_counter()
         transformTreesForEveryInputMatrix = []
         for plan in planAssignments:
 
+            plan_start = time.perf_counter()
             transformTreePerPlan = []
 
             for arc_set in arc_problem.training_set():
@@ -365,52 +364,80 @@ class ArcAgent:
                 )
 
             transformTreesForEveryInputMatrix.append(transformTreePerPlan)
+            dbg(f"{arc_problem.problem_name()}: [train] plan '{plan}' took {(time.perf_counter() - plan_start) * 1000:.1f} ms")
+
+        dbg(f"{arc_problem.problem_name()}: step 3 (apply plans to training set) total {(time.perf_counter() - step3_start) * 1000:.1f} ms")
 
         # Step 4 - Find Matching Outputs
+        step4_start = time.perf_counter()
         transformTreesForEveryInputMatrix = markMatchingOutputs(transformTreesForEveryInputMatrix)
+        dbg(f"{arc_problem.problem_name()}: step 4 (mark matching outputs) took {(time.perf_counter() - step4_start) * 1000:.1f} ms")
 
         for plan_idx, plan in enumerate(planAssignments):
             for example_idx, (tree, _) in enumerate(transformTreesForEveryInputMatrix[plan_idx]):
                 nodes = list(iter_nodes_with_paths(tree))
                 matched_count = sum(1 for _, node in nodes if node.matched)
                 total_count = sum(1 for _, node in nodes if node.result is not None)
-                print(f"{arc_problem.problem_name()}: plan '{plan}' example {example_idx + 1}: {matched_count}/{total_count} nodes matched")
+                # print(f"{arc_problem.problem_name()}: plan '{plan}' example {example_idx + 1}: {matched_count}/{total_count} nodes matched")
 
         # Step 4 - Find index matches
         index_matches = find_index_matches(transformTreesForEveryInputMatrix)
-        for plan, matches in zip(planAssignments, index_matches):
-            if matches:
-                print(f"{arc_problem.problem_name()}: plan '{plan}' matched output for every example")
+        # for plan, matches in zip(planAssignments, index_matches):
+        #     if matches:
+        #         print(f"{arc_problem.problem_name()}: plan '{plan}' matched output for every example")
 
         # Step 5 - Find tag matches
         tag_matches = find_tag_matches(transformTreesForEveryInputMatrix)
 
+        # Step 5b - Print shared tags for plans that matched every example
+        for plan_idx, plan in enumerate(planAssignments):
+            plan_trees = transformTreesForEveryInputMatrix[plan_idx]
+            all_examples_matched = all(
+                any(node.matched for _, node in iter_nodes_with_paths(tree))
+                for tree, _ in plan_trees
+            )
+            # if all_examples_matched:
+            #     print(f"{arc_problem.problem_name()}: plan '{plan}' matched every example, shared tags: {tag_matches[plan_idx]}")
+
         # Step 6 - Case Based Solutions (skipped for now. may implment later)
 
         # Step 7 - Apply Plans to Test Input
+        step7_start = time.perf_counter()
         testInputMatrix = arc_problem.test_set().get_input_data().data()
         plansAppliedToTestInputMatrix = []
         for plan in planAssignments:
+            plan_start = time.perf_counter()
             plansAppliedToTestInputMatrix.append(performPlan(testInputMatrix, plan))
+            dbg(f"{arc_problem.problem_name()}: [test] plan '{plan}' took {(time.perf_counter() - plan_start) * 1000:.1f} ms")
+
+        dbg(f"{arc_problem.problem_name()}: step 7 (apply plans to test input) total {(time.perf_counter() - step7_start) * 1000:.1f} ms")
 
         self.last_test_trees = list(zip(planAssignments, plansAppliedToTestInputMatrix))
 
         # Step 8 - Apply top matches to plans
+        step8_start = time.perf_counter()
         all_predictions_from_highest_to_lowest_quality = applyAndSort(
             plansAppliedToTestInputMatrix,
             index_matches,
-            tag_matches
+            tag_matches,
+            planAssignments
         )
+        dbg(f"{arc_problem.problem_name()}: step 8 (apply and sort) took {(time.perf_counter() - step8_start) * 1000:.1f} ms")
 
         # Step 9 - Take the top 3 unique predictions, padding with the best
         # guess if fewer than 3 unique candidates were found.
         predictions: list[np.ndarray] = []
-        for candidate in all_predictions_from_highest_to_lowest_quality:
+        prediction_matches: list[dict] = []
+        for candidate, match_info in all_predictions_from_highest_to_lowest_quality:
             if not any(np.array_equal(candidate, existing) for existing in predictions):
                 predictions.append(candidate)
+                prediction_matches.append(match_info)
             if len(predictions) == 3:
                 break
         while predictions and len(predictions) < 3:
             predictions.append(predictions[-1])
+            prediction_matches.append(prediction_matches[-1])
+
+        self.last_prediction_matches = prediction_matches
 
         return predictions  # a list[np.ndarray] of size 3

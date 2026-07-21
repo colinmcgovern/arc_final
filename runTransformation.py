@@ -1,10 +1,29 @@
 import itertools
-import json
 import os
+import time
 from collections import Counter
 
 import numpy as np
 from scipy import ndimage
+
+ARC_DEBUG = os.environ.get("ARC_DEBUG", "1") != "0"
+
+
+def dbg(msg):
+    if ARC_DEBUG:
+        print(f"[DEBUG] {msg}")
+
+
+# accumulated (total_seconds, call_count) per transformation name, reset by
+# get_and_reset_transform_timings() at the start/end of each runPlan() call
+_TRANSFORM_TIMINGS = {}
+
+
+def get_and_reset_transform_timings():
+    global _TRANSFORM_TIMINGS
+    timings = {name: (ms * 1000, count) for name, (ms, count) in _TRANSFORM_TIMINGS.items()}
+    _TRANSFORM_TIMINGS = {}
+    return timings
 
 # input is a list of arugments
 # the first arguemtnt is the input matrix
@@ -18,10 +37,6 @@ from scipy import ndimage
 # most common color in output matrix, 2nd, 3rd, number of unique_colors in input,
 # number of unique_color in output, does the input matrix match the
 # output matrix
-
-_TRANSFORMATIONS_PATH = os.path.join(os.path.dirname(__file__), "transformations.json")
-with open(_TRANSFORMATIONS_PATH) as f:
-    TRANSFORMATIONS = json.load(f)
 
 MAX_NUM_OF_COLOR_COMBOS = 2
 MAX_NUM_OF_PALETTE_ROTATION_COLORS = 5
@@ -216,16 +231,20 @@ def _generate_logic_combinations(matrix_list):
     return result
 
 
-def _stack_colored(matrix_list):
-    if not matrix_list:
-        return []
+def _generate_stack_combos(matrix_list):
     result = []
-    for perm in itertools.permutations(matrix_list):
-        stacked = perm[0].copy().astype(int)
-        for m in perm[1:]:
-            mask = m != 0
-            stacked[mask] = m[mask]
-        result.append(stacked)
+    for base, overlay in itertools.permutations(matrix_list, 2):
+        if base.shape != overlay.shape:
+            result.append(base.copy())
+            continue
+        conflict = (base != 0) & (overlay != 0)
+        if np.any(conflict):
+            result.append(base.copy())
+        else:
+            combined = base.copy()
+            mask = overlay != 0
+            combined[mask] = overlay[mask]
+            result.append(combined)
     return result
 
 
@@ -311,10 +330,10 @@ def _generate_all_color_combinations(matrix_list):
         digits = list(range(0, 10))
         for targets in itertools.product(digits, repeat=k):
             mapping = {present[i]: targets[i] for i in range(k)}
-            new_m = np.zeros_like(m)
+            lut = np.arange(10, dtype=m.dtype)
             for src, dst in mapping.items():
-                new_m[m == src] = dst
-            result.append(new_m)
+                lut[src] = dst
+            result.append(lut[m])
             tags = {}
             for src, dst in mapping.items():
                 tags[f"{src}_replaced_with"] = str(dst)
@@ -335,15 +354,50 @@ def _generate_palette_rotations(matrix_list):
             if perm == identity:
                 continue
             mapping = {present[i]: perm[i] for i in range(k)}
-            new_m = np.zeros_like(m)
+            lut = np.arange(10, dtype=m.dtype)
             for src, dst in mapping.items():
-                new_m[m == src] = dst
-            result.append(new_m)
+                lut[src] = dst
+            result.append(lut[m])
     return result
 
 
 _RING_STRUCT = np.ones((3, 3), dtype=int)
 _BLOB_STRUCT = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+
+
+def _color_pixel_counts(matrix: np.ndarray) -> dict:
+    counts = Counter(int(v) for v in matrix.flatten())
+    counts.pop(0, None)
+    return counts
+
+
+def _color_blob_counts(matrix: np.ndarray) -> dict:
+    counts = {}
+    for color in np.unique(matrix):
+        color = int(color)
+        if color == 0:
+            continue
+        mask = (matrix == color).astype(int)
+        _, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
+        counts[color] = n_features
+    return counts
+
+
+def _build_bar_graph(color_values: dict) -> np.ndarray:
+    if not color_values:
+        return np.zeros((1, 1), dtype=int)
+    colors = sorted(color_values)
+    height = max(color_values.values())
+    if height <= 0:
+        return np.zeros((1, 1), dtype=int)
+    graph = np.zeros((height, len(colors)), dtype=int)
+    for col_idx, color in enumerate(colors):
+        val = color_values[color]
+        for row in range(height):
+            level = height - row
+            if val >= level:
+                graph[row, col_idx] = color
+    return graph
 
 
 def _generate_ring_recolors(matrix_list, use_holes):
@@ -376,7 +430,7 @@ def _generate_ring_recolors(matrix_list, use_holes):
 def reflection(input_matrix: np.ndarray, parameters: list):
     """
     Reflects input_matrix left-right and up-down.
-    Adapted from generate_reflections in OLD_ArcAgent.py.
+    Adapted from generate_reflections in OLD_ArcAgent.py.draw_line_between_points
     """
     return _generate_reflections([input_matrix])
 
@@ -483,18 +537,27 @@ def inscribe(input_matrix: np.ndarray, parameters: list):
 def draw_line_between_points(input_matrix: np.ndarray, parameters: list):
     """
     Draws a line between every ordered pair of points in parameters (the coords
-    list), using the color already present at the first point of each pair.
+    list) whose source and destination points share the same original color,
+    using that shared color. Tags each result with
+    source_meets_destination_color (always True, since mismatched pairs are
+    skipped).
     Adapted from generate_draw_line in OLD_ArcAgent.py.
     """
     coords = parameters
     result = []
+    tags_list = []
     for p1 in coords:
         for p2 in coords:
             if p1 == p2:
                 continue
             color = int(input_matrix[p1[0], p1[1]])
-            result.extend(_generate_draw_line([input_matrix], p1, p2, color))
-    return result
+            dest_color = int(input_matrix[p2[0], p2[1]])
+            if color != dest_color:
+                continue
+            lines = _generate_draw_line([input_matrix], p1, p2, color)
+            result.extend(lines)
+            tags_list.extend({"source_meets_destination_color": True} for _ in lines)
+    return result, tags_list
 
 
 def draw_drawable_lines(input_matrix: np.ndarray, parameters: list):
@@ -525,15 +588,47 @@ def logic_combine(input_matrix: np.ndarray, parameters: list):
     matrix_list = [input_matrix] + list(parameters)
     return _generate_logic_combinations(matrix_list)
 
-
+# stack combine takes combines two matrixes and stacks them on top of each other
+# 0 is treated as the background. if the two matrixes don't stack perfectly 
+# then only return the first matrix
+# example 1 
+# input a 
+# 1 1 1 0
+# 1 0 1 0
+# 1 1 1 0
+# input b
+# 0 0 0 0
+# 0 2 0 0 
+# 0 0 0 0 
+# outputs
+# 1 1 1 0
+# 1 2 1 0
+# 1 1 1 0
+# example 1 
+# input a 
+# 1 1 1 0
+# 1 0 1 0
+# 1 1 1 0
+# input b
+# 0 0 0 0
+# 0 2 2 0 
+# 0 0 0 0 
+# outputs
+# 1 1 1 0
+# 1 0 1 0
+# 1 1 1 0
 def stack_combine(input_matrix: np.ndarray, parameters: list):
     """
     Stacks input_matrix and the matrices in parameters on top of each other
-    (0 treated as transparent), for every permutation.
-    Adapted from stack_colored in OLD_ArcAgent.py.
+    (0 treated as transparent). For each ordered pair drawn from
+    [input_matrix] + parameters, overlays the second matrix's non-zero
+    pixels onto the first wherever the first is zero; if any non-zero
+    pixels from both matrices land on the same cell, the pair doesn't
+    "stack perfectly" and the first matrix is returned unchanged for that
+    pair.
     """
     matrix_list = [input_matrix] + list(parameters)
-    return _stack_colored(matrix_list)
+    return _generate_stack_combos(matrix_list)
 
 
 def apply_gravity(input_matrix: np.ndarray, parameters: list):
@@ -559,13 +654,35 @@ def crop_to_content(input_matrix: np.ndarray, parameters: list):
     """
     return _generate_cropped([input_matrix])[0]
 
-
+# this takes the input matrix and crops one row and column off of the input matrix
+# for example the input
+# 0 1 2
+# 1 2 3
+# becomes the outputs
+# 0 1
+# 1 2
+# and
+# 1 2
+# 2 3
+# and
+# 0 1 2
+# and 
+# 1 2 3
 def crop_one_off_each_side(input_matrix: np.ndarray, parameters: list):
     """
-    Placeholder for the "crop_one_off_each_side" transformation (see transformations.json).
-    No equivalent logic exists in OLD_ArcAgent.py.
+    Crops one row/column off a single side of input_matrix at a time (left,
+    right, top, bottom), producing up to 4 outputs. A side is skipped if
+    cropping it would leave an empty matrix.
     """
-    raise NotImplementedError
+    rows, cols = input_matrix.shape
+    result = []
+    if cols > 1:
+        result.append(input_matrix[:, :-1])
+        result.append(input_matrix[:, 1:])
+    if rows > 1:
+        result.append(input_matrix[:-1, :])
+        result.append(input_matrix[1:, :])
+    return result
 
 
 def no_change(input_matrix: np.ndarray, parameters: list):
@@ -592,13 +709,27 @@ def crop_to_m_n_of_input_dim(input_matrix: np.ndarray, parameters: list):
     """
     raise NotImplementedError
 
-
+# this function takes in the input matrix and makes bar graphs according to aspects
+# about the matrix. 
+# the graphs it must make include: num_of_each_color, num_blobs of each count_colors
+# example input:
+# 0 0 1 1 0 2
+# 2 0 0 3 0 0
+# # would output:
+# 1 2 0
+# 1 2 3
+# and
+# 0 2 0
+# 1 2 3
 def make_graph(input_matrix: np.ndarray, parameters: list):
     """
-    Placeholder for the "make_graph" transformation (see transformations.json).
-    No equivalent logic exists in OLD_ArcAgent.py.
+    Builds two bar-graph matrices from input_matrix: one showing pixel count
+    per non-background color, one showing blob count per non-background
+    color. Columns are sorted by color ascending; bars fill bottom-up.
     """
-    raise NotImplementedError
+    pixel_counts = _color_pixel_counts(input_matrix)
+    blob_counts = _color_blob_counts(input_matrix)
+    return [_build_bar_graph(pixel_counts), _build_bar_graph(blob_counts)]
 
 
 def fill_blobs(input_matrix: np.ndarray, parameters: list):
@@ -632,12 +763,36 @@ def remove_touching(input_matrix: np.ndarray, parameters: list):
     """
     raise NotImplementedError
 
-
+# this function adds the original root input matrix to the output matrix 
+# it assumes that the 0 color is the background color and should be treated as transparent
+# example 
+# root matrix:
+# 0 0 0 
+# 0 1 1
+# input matrix:
+# 2 2 2
+# 2 2 2
+# output:
+# 2 2 2 
+# 2 1 1
 def apply_original_input(input_matrix: np.ndarray, parameters: list):
     """
-    Returns input_matrix unchanged.
+    Overlays the root matrix (parameters[0]) on top of input_matrix, treating
+    0 in the root matrix as transparent so input_matrix shows through there.
+    Returns input_matrix unchanged if no root matrix was supplied or its shape
+    doesn't match input_matrix's.
     """
-    return input_matrix
+    if not parameters:
+        return input_matrix
+
+    root_matrix = parameters[0]
+    if root_matrix.shape != input_matrix.shape:
+        return input_matrix
+
+    result = input_matrix.copy()
+    mask = root_matrix != 0
+    result[mask] = root_matrix[mask]
+    return result
 
 
 def generate_all_color_combos(input_matrix: np.ndarray, parameters: list):
@@ -714,6 +869,92 @@ def _top_color_ranks(matrix: np.ndarray, n: int = 3) -> list:
     return ranked
 
 
+def _count_lines_by_direction(matrix: np.ndarray) -> dict:
+    """
+    Counts drawable line-runs (horizontal, vertical, and both diagonal
+    directions) of length >= 3 whose color differs from the majority
+    color on either side of the run, broken down per direction.
+    Ported from countLines in OLD_ArcAgent.py (see also _count_lines in
+    ArcAgent.py, which sums this dict's values).
+    """
+    def majority_color(counts, total):
+        if not counts:
+            return None
+        color, cnt = counts.most_common(1)[0]
+        return color if cnt * 2 > total else None
+
+    def count_runs(seq):
+        seq = list(seq)
+        n_total = len(seq)
+        n, i = 0, 0
+        # left_counts/right_counts are kept in sync with Counter(seq[:i]) and
+        # Counter(seq[i:]) respectively, so majority_color never has to
+        # rescan a slice from scratch (each seq[:i]/seq[j:] used to be
+        # rebuilt into a fresh Counter on every run, making this O(n^2) per
+        # line for lines with many short runs).
+        left_counts = Counter()
+        right_counts = Counter(seq)
+        while i < n_total:
+            if seq[i] != 0:
+                j = i + 1
+                while j < n_total and seq[j] == seq[i]:
+                    j += 1
+                line_color = seq[i]
+                run_len = j - i
+                lc = majority_color(left_counts, i)
+                right_counts[line_color] -= run_len
+                if right_counts[line_color] <= 0:
+                    del right_counts[line_color]
+                rc = majority_color(right_counts, n_total - j)
+                if lc is not None and rc is not None:
+                    bg_ok = lc == rc and lc != line_color
+                elif lc is not None:
+                    bg_ok = lc != line_color
+                elif rc is not None:
+                    bg_ok = rc != line_color
+                else:
+                    bg_ok = True
+                if run_len >= 3 and bg_ok:
+                    n += 1
+                left_counts[line_color] += run_len
+                i = j
+            else:
+                left_counts[0] += 1
+                right_counts[0] -= 1
+                if right_counts[0] <= 0:
+                    del right_counts[0]
+                i += 1
+        return n
+
+    matrix = np.array(matrix)
+    rows, cols = matrix.shape
+    horizontal = sum(count_runs(matrix[r, :]) for r in range(rows))
+    vertical = sum(count_runs(matrix[:, c]) for c in range(cols))
+    diagonal_tl_br = sum(count_runs(np.diag(matrix, d)) for d in range(-(rows - 1), cols))
+    flipped = np.fliplr(matrix)
+    diagonal_tr_bl = sum(count_runs(np.diag(flipped, d)) for d in range(-(rows - 1), cols))
+    return {
+        "horizontal": horizontal,
+        "vertical": vertical,
+        "diagonal_tl_br": diagonal_tl_br,
+        "diagonal_tr_bl": diagonal_tr_bl,
+    }
+
+
+def _count_pixels_touching_border(matrix: np.ndarray) -> int:
+    """
+    Counts non-zero cells that lie on the outer border (first/last row or
+    first/last column) of matrix.
+    """
+    rows, cols = matrix.shape
+    border_mask = np.zeros((rows, cols), dtype=bool)
+    border_mask[0, :] = True
+    border_mask[rows - 1, :] = True
+    border_mask[:, 0] = True
+    border_mask[:, cols - 1] = True
+    return int(np.sum((matrix != 0) & border_mask))
+
+
 def _make_tags(input_matrix: np.ndarray, output_matrix: np.ndarray) -> dict:
     input_ranks = _top_color_ranks(input_matrix)
     output_ranks = _top_color_ranks(output_matrix)
@@ -728,6 +969,7 @@ def _make_tags(input_matrix: np.ndarray, output_matrix: np.ndarray) -> dict:
         "num_unique_colors_input": len(np.unique(input_matrix)),
         "num_unique_colors_output": len(np.unique(output_matrix)),
         "input_matches_output": bool(np.array_equal(input_matrix, output_matrix)),
+        "num_pixels_touching_border": _count_pixels_touching_border(output_matrix),
     }
 
 
@@ -744,7 +986,11 @@ def runTransformation(input_matrix: np.ndarray, transformation_name: str, parame
     if transformation_name not in TRANSFORMATION_FUNCTIONS:
         raise ValueError(f"Unknown transformation: {transformation_name}")
 
+    t0 = time.time()
     result = TRANSFORMATION_FUNCTIONS[transformation_name](input_matrix, parameters)
+    elapsed = time.time() - t0
+    prev_ms, prev_count = _TRANSFORM_TIMINGS.get(transformation_name, (0.0, 0))
+    _TRANSFORM_TIMINGS[transformation_name] = (prev_ms + elapsed, prev_count + 1)
 
     extra_tags = None
     if isinstance(result, tuple):
