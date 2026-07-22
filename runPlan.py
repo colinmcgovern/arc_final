@@ -233,6 +233,26 @@ def _make_children(parent_node, transformation_name, matrices, tags_list, mea_ty
     return new_nodes
 
 
+def _mark_non_unique_dead_ends(nodes):
+    """
+    Groups nodes by their transformed matrix (node.result) and marks every
+    node after the first live one in each group as a dead end, bounding
+    frontier growth when a round produces many duplicate matrices.
+    Nodes already marked as dead ends are excluded from the grouping so a
+    live duplicate is never killed just because an already-dead node of the
+    same matrix happened to be seen first.
+    """
+    seen = set()
+    for node in nodes:
+        if node.is_dead_end:
+            continue
+        key = (node.result.shape, node.result.tobytes())
+        if key in seen:
+            node.is_dead_end = True
+        else:
+            seen.add(key)
+
+
 def _group_by_parent(frontier):
     groups = {}
     order = []
@@ -293,7 +313,7 @@ def _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_m
     return new_frontier
 
 
-def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix, shared_output_dims=None):
+def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix, shared_output_dims=None, frontier_size_limit=None):
     """
     Advances frontier through transformation_rounds (a plan's
     "transformation_rounds" list), building children onto whatever tree the
@@ -316,6 +336,9 @@ def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix
             dbg(f"round {round_idx} iteration {iteration}: starting with frontier size {len(frontier)}")
             new_frontier = _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_matrix, shared_output_dims)
 
+            if frontier_size_limit is not None and len(new_frontier) > frontier_size_limit:
+                _mark_non_unique_dead_ends(new_frontier)
+
             dead_end_count = sum(1 for node in new_frontier if node.is_dead_end)
             dbg(f"round {round_idx} iteration {iteration}: {dead_end_count} of {len(new_frontier)} nodes marked is_dead_end = True")
 
@@ -326,7 +349,7 @@ def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix
     return frontier, False
 
 
-def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None):
+def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None, frontier_size_limit=None):
     """
     Runs the named plan (see plans.json) against input_matrix, building and
     returning the root of a TransformationNode tree of every candidate matrix
@@ -344,6 +367,10 @@ def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None):
     example's output (see SHARED_OUTPUT_DIM_TRANSFORMATIONS), or None if no
     such shared shape exists. It's the same across training and test-input
     runs of a given problem, unlike goal_matrix.
+
+    frontier_size_limit, if given, bounds frontier growth: once a round's
+    frontier exceeds this size, all but one node per distinct transformed
+    matrix are marked as dead ends (see _mark_non_unique_dead_ends).
     """
     global _TIME_ROOT_PATTERN
     _TIME_ROOT_PATTERN = 0.0
@@ -361,7 +388,7 @@ def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None):
     start_time = time.time()
 
     rounds_start = time.time()
-    frontier, time_exceeded = _run_rounds(frontier, plan.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims)
+    frontier, time_exceeded = _run_rounds(frontier, plan.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims, frontier_size_limit)
     dbg(f"plan '{plan_name}': primary rounds took {(time.time() - rounds_start) * 1000:.1f} ms, "
         f"time_exceeded={time_exceeded}, final frontier size {len(frontier)}")
     if time_exceeded or not frontier:
@@ -370,7 +397,7 @@ def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None):
 
     every_end_start = time.time()
     every_end = _get_plan("every_end")
-    _run_rounds(frontier, every_end.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims)
+    _run_rounds(frontier, every_end.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims, frontier_size_limit)
     dbg(f"plan '{plan_name}': every_end rounds took {(time.time() - every_end_start) * 1000:.1f} ms")
 
     _report_plan_timings(plan_name)

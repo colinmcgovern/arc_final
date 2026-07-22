@@ -192,11 +192,37 @@
                 "num_times": 1,
                 "transformations": [
                     "fill_blobs",
-                    "recolor_donuts",
                     "no_change"
                 ]
             }
 
+        ]
+    },
+    {
+        "name": "donut_recoloring",
+        "transformation_rounds": [
+            {
+                "num_times": 1,
+                "transformations": [
+                    "recolor_donut_frame",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                    "recolor_donut_interior",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "transformations": [
+                   "generate_all_color_combos",
+                   "palette_rotation",
+                   "no_change"
+                ]
+            }
         ]
     },
     {

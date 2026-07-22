@@ -17,11 +17,11 @@ def dbg(msg):
     if ARC_DEBUG:
         pass  # print(f"[DEBUG] {msg}")
 
-FRONTIER_LIMIT_SIZE = 20000
-
 TAG_FALLBACK_CANDIDATES_PER_PLAN = 3
 
 _BLOB_STRUCT = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+
+FRONTIER_SIZE_LIMIT_BEFORE_REMOVING_NON_UNIQUE = 5000
 
 def makePlanAssignments(
     outputHasMoreLines,
@@ -209,7 +209,7 @@ def findPossibleBlobReflection(arc_problem: ArcProblem) -> bool:
     )
 
 
-def performPlan(input_matrix: np.ndarray, plan: str, goal_matrix, shared_output_dims=None):
+def performPlan(input_matrix: np.ndarray, plan: str, goal_matrix, shared_output_dims=None, frontier_size_limit=None):
     """
     Runs the named plan's transformation rounds (see plans.json) against
     a single input matrix and returns the resulting transform tree
@@ -223,8 +223,12 @@ def performPlan(input_matrix: np.ndarray, plan: str, goal_matrix, shared_output_
     shared_output_dims is the (rows, cols) shape shared by every training
     example's output (see _shared_output_dimensions), or None if there
     isn't one.
+
+    frontier_size_limit, if given, bounds frontier growth: once a round's
+    frontier exceeds this size, all but one node per distinct transformed
+    matrix are marked as dead ends (see _mark_non_unique_dead_ends).
     """
-    return runPlan(input_matrix, plan, goal_matrix, shared_output_dims)
+    return runPlan(input_matrix, plan, goal_matrix, shared_output_dims, frontier_size_limit)
 
 
 def markMatchingOutputs(transformTreesForEveryInputMatrix):
@@ -387,7 +391,7 @@ class ArcAgent:
                 inputMatrix = arc_set.get_input_data().data()
                 expectedOutput = arc_set.get_output_data().data()
                 transformTreePerPlan.append(
-                    (performPlan(inputMatrix, plan, expectedOutput, shared_output_dims), expectedOutput)
+                    (performPlan(inputMatrix, plan, expectedOutput, shared_output_dims, FRONTIER_SIZE_LIMIT_BEFORE_REMOVING_NON_UNIQUE), expectedOutput)
                 )
 
             transformTreesForEveryInputMatrix.append(transformTreePerPlan)
@@ -452,7 +456,7 @@ class ArcAgent:
                 plansAppliedToTestInputMatrix.append(("index", replayed))
                 last_test_trees.extend((plan, root) for _, root in replayed)
             elif tags_for_plan:
-                tree = performPlan(testInputMatrix, plan, None, shared_output_dims)
+                tree = performPlan(testInputMatrix, plan, None, shared_output_dims, FRONTIER_SIZE_LIMIT_BEFORE_REMOVING_NON_UNIQUE)
                 plansAppliedToTestInputMatrix.append(("full", tree))
                 last_test_trees.append((plan, tree))
             else:
