@@ -162,5 +162,11 @@
         "parameters": ["shared_input_dimensions"],
         "canBeBackToBack": false,
         "unique_output_tags": []
+    },
+    {
+        "name": "remove_touching",
+        "parameters": [],
+        "canBeBackToBack": false,
+        "unique_output_tags": []
     }
 ]

@@ -17,11 +17,11 @@ def dbg(msg):
     if ARC_DEBUG:
         pass  # print(f"[DEBUG] {msg}")
 
+FRONTIER_LIMIT_SIZE = 20000
 
 TAG_FALLBACK_CANDIDATES_PER_PLAN = 3
 
 _BLOB_STRUCT = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
-
 
 def makePlanAssignments(
     outputHasMoreLines,
@@ -126,27 +126,28 @@ def _is_x_subset_of_y(input_matrix: np.ndarray, output_matrix: np.ndarray) -> bo
 
 def findPossibleReflection(arc_problem: ArcProblem) -> bool:
     """
-    Returns True if the output dimensions are a whole-number multiple of
-    the input's (independently per axis) and the input matrix appears
-    unmodified as a contiguous submatrix somewhere in the output (the
-    "reflections" plan).
-
-    Best-effort placeholder heuristic (no OLD_ArcAgent.py equivalent): this
-    is a cheap, permissive gate rather than a strict verification of the
-    reflection pattern - the "reflections" plan itself checks candidate
-    transforms against the real output later.
+    Returns True if, for every training example, the input matrix appears
+    unmodified as a contiguous submatrix somewhere in the output AND at
+    least one reflection (horizontal or vertical flip) of the input also
+    appears as a contiguous submatrix in the output (the "reflections"
+    plan).
     """
     training = arc_problem.training_set()
 
-    # for example in training:
-    #     print(_is_x_subset_of_y(example.get_input_data().data(), example.get_output_data().data()))
-
     if not training:
         return False
-    return all(
-        _is_x_subset_of_y(example.get_input_data().data(), example.get_output_data().data())
-        for example in training
-    )
+
+    def _example_matches(example) -> bool:
+        input_matrix = example.get_input_data().data()
+        output_matrix = example.get_output_data().data()
+        if not _is_x_subset_of_y(input_matrix, output_matrix):
+            return False
+        return (
+            _is_x_subset_of_y(np.fliplr(input_matrix), output_matrix)
+            or _is_x_subset_of_y(np.flipud(input_matrix), output_matrix)
+        )
+
+    return all(_example_matches(example) for example in training)
 
 
 def _shared_output_dimensions(arc_problem: ArcProblem):

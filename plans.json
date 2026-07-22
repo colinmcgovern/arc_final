@@ -67,8 +67,9 @@
                     "no_change"
                 ]
             },
-                        {
+            {
                 "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal_with_oob"],
                 "transformations": [
                     "reflection",
                     "no_change"
@@ -76,6 +77,7 @@
             },
             {
                 "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal_with_oob"],
                 "transformations": [
                     "concat_all_combos",
                     "no_change"
@@ -83,6 +85,7 @@
             },
                         {
                 "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal_with_oob"],
                 "transformations": [
                     "reflection",
                     "no_change"
@@ -90,6 +93,7 @@
             },
             {
                 "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal_with_oob"],
                 "transformations": [
                     "concat_all_combos",
                     "no_change"
