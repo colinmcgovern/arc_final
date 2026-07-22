@@ -425,6 +425,44 @@ def _generate_ring_recolors(matrix_list, use_holes):
     return result
 
 
+def _find_donuts(matrix: np.ndarray) -> list:
+    """
+    Finds "donuts": single-color 4-connected blobs (frames) that fully
+    enclose a hole (per ndimage.binary_fill_holes - a hole touching the
+    outer grid edge is not enclosed). A frame's enclosed interior may
+    contain a mix of colors, not just background 0; color_counts and
+    most_common_color only reflect those interior cells, never the frame.
+    """
+    donuts = []
+    for color in np.unique(matrix):
+        color = int(color)
+        if color == 0:
+            continue
+        mask = (matrix == color)
+        labeled, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
+        for label_id in range(1, n_features + 1):
+            border_mask = labeled == label_id
+            interior_mask = ndimage.binary_fill_holes(border_mask) & ~border_mask
+            if not interior_mask.any():
+                continue
+
+            color_counts = {c: 0 for c in range(10)}
+            for c in matrix[interior_mask]:
+                color_counts[int(c)] += 1
+            most_common_color = max(color_counts, key=lambda c: (color_counts[c], -c))
+
+            donuts.append({
+                "border_color": color,
+                "border_mask": border_mask,
+                "border_coords": list(zip(*np.where(border_mask))),
+                "interior_mask": interior_mask,
+                "interior_coords": list(zip(*np.where(interior_mask))),
+                "color_counts": color_counts,
+                "most_common_color": most_common_color,
+            })
+    return donuts
+
+
 # --- transformation subfunctions (see transformations.json) ---
 
 def reflection(input_matrix: np.ndarray, parameters: list):
@@ -532,6 +570,159 @@ def inscribe(input_matrix: np.ndarray, parameters: list):
     ring of any enclosed hole, once per candidate color 0-9.
     """
     return _generate_ring_recolors([input_matrix], use_holes=True)
+
+# This function recolors only one donut at a time from in input matrix
+# and outputs the new color for each of the possible colors
+# if there is more than one donut then only recolor one at a time 
+# ensure that tags capture if the donut is recolored to the most common
+# color within the donut and other donut related fields
+# example 1
+# input
+# 1 1 1 0 1
+# 1 0 1 0 1
+# 1 1 1 0 0
+
+# output
+# 1 1 1 0 1
+# 1 0 1 0 1
+# 1 1 1 0 0
+
+# 2 2 2 0 1
+# 2 0 2 0 1
+# 2 2 2 0 0
+
+# ...
+
+# 9 9 9 0 1
+# 9 0 9 0 1
+# 9 9 9 0 0
+# example 2
+# input
+# 1 1 1 0 1 1 1
+# 1 0 1 0 1 0 1
+# 1 1 1 0 1 1 1
+
+# output
+# 1 1 1 0 1 1 1
+# 1 0 1 0 1 0 1
+# 1 1 1 0 1 1 1
+
+# ...
+
+# 9 9 9 0 1 1 1
+# 9 0 9 0 1 0 1
+# 9 9 9 0 1 1 1
+
+# 1 1 1 0 2 2 2
+# 1 0 1 0 2 0 2
+# 1 1 1 0 2 2 2
+# ...
+# 1 1 1 0 9 9 9
+# 1 0 1 0 9 0 9
+# 1 1 1 0 9 9 9
+def recolor_a_donut_frame(input_matrix: np.ndarray, parameters: list):
+    """
+    For each donut (a single-color frame blob fully enclosing a hole, see
+    _find_donuts), recolors just that donut's frame, once per candidate
+    color 0-9, leaving any other donuts untouched. Tags note the donut's
+    original/new color and whether the new color matches the most common
+    color within the donut's interior.
+    """
+    donuts = _find_donuts(input_matrix)
+    result = []
+    tags_list = []
+    for i, donut in enumerate(donuts):
+        for new_color in range(10):
+            out = input_matrix.copy()
+            out[donut["border_mask"]] = new_color
+            result.append(out)
+            tags_list.append({
+                "donut_original_color": donut["border_color"],
+                "donut_new_color": new_color,
+                "donut_most_common_interior_color": donut["most_common_color"],
+                "recolored_to_most_common_color": bool(new_color == donut["most_common_color"]),
+                "num_donuts_in_matrix": len(donuts),
+                "donut_index": i,
+            })
+    return result, tags_list
+
+# This function the interior of a donut, one at a time
+# Ensure that tags capture if the donut is recolored to the most common
+# color in the frame before recoloring, fill color matches frame color, and other donut related information
+# example 1
+
+# input
+# 1 1 1 1
+# 1 0 0 1
+# 1 0 2 1
+# 1 1 1 1
+
+# outputs
+# 1 1 1 1
+# 1 0 0 1
+# 1 0 0 1
+# 1 1 1 1
+
+# ...
+
+# 1 1 1 1
+# 1 9 9 1
+# 1 9 9 1
+# 1 1 1 1
+
+# example 2
+
+# input
+# 1 1 1 0 2 2 2
+# 1 0 1 0 2 0 2
+# 1 1 1 0 2 2 2
+
+# outputs
+# 1 1 1 0 2 2 2
+# 1 0 1 0 2 0 2
+# 1 1 1 0 2 2 2
+
+# 1 1 1 0 2 2 2
+# 1 1 1 0 2 0 2
+# 1 1 1 0 2 2 2
+# ...
+# 1 1 1 0 2 2 2
+# 1 9 1 0 2 0 2
+# 1 1 1 0 2 2 2
+
+# 1 1 1 0 2 2 2
+# 1 0 1 0 2 0 2
+# 1 1 1 0 2 2 2
+# ...
+# 1 1 1 0 2 2 2
+# 1 0 1 0 2 9 2
+# 1 1 1 0 2 2 2
+def recolor_a_donut_interior(input_matrix: np.ndarray, parameters: list):
+    """
+    For each donut (see _find_donuts), recolors just that donut's interior,
+    once per candidate color 0-9, leaving the frame and any other donuts
+    untouched. Tags note the donut's frame color, the interior's most common
+    color before recoloring, the new fill color, whether the fill matches
+    the most common interior color, and whether it matches the frame color.
+    """
+    donuts = _find_donuts(input_matrix)
+    result = []
+    tags_list = []
+    for i, donut in enumerate(donuts):
+        for new_color in range(10):
+            out = input_matrix.copy()
+            out[donut["interior_mask"]] = new_color
+            result.append(out)
+            tags_list.append({
+                "donut_frame_color": donut["border_color"],
+                "donut_new_interior_color": new_color,
+                "donut_most_common_interior_color": donut["most_common_color"],
+                "recolored_to_most_common_color": bool(new_color == donut["most_common_color"]),
+                "fill_color_matches_frame_color": bool(new_color == donut["border_color"]),
+                "num_donuts_in_matrix": len(donuts),
+                "donut_index": i,
+            })
+    return result, tags_list
 
 
 def draw_line_between_points(input_matrix: np.ndarray, parameters: list):
@@ -1047,6 +1238,7 @@ TRANSFORMATION_FUNCTIONS = {
     "make_graph": make_graph,
     "fill_blobs": fill_blobs,
     "recolor_donuts": recolor_donuts,
+    "recolor_a_donut_frame": recolor_a_donut_frame,
     "reflect_over_lines": reflect_over_lines,
     "remove_touching": remove_touching,
     "apply_original_input": apply_original_input,

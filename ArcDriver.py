@@ -90,12 +90,11 @@ if __name__ == "__main__":
     # TEST_PROBLEM_HASH = ["81c0276b"] # Make Graph
     # TEST_PROBLEM_HASH = ["18419cfa"] # Blob Reflections
     # TEST_PROBLEM_HASH = ["d931c21c", "ce22a75a"] # Dialate Inscribe
-    # TEST_PROBLEM_HASH = ["4b6b68e5"] # Recolor Frame
-    # TEST_PROBLEM_HASH = ["7b6016b9"] # Recolor Contents Of Frame Then Recolor Background
+    TEST_PROBLEM_HASH = ["4b6b68e5", "7b6016b9"] # Donuts
     # TEST_PROBLEM_HASH = ["f76d97a5", "ed36ccf7", "b1948b0a", "1cf80156"] # General
 
     # TEST_PROBLEM_HASH = ["c48954c1"]
-    TEST_PROBLEM_HASH = None
+    # TEST_PROBLEM_HASH = None
 
     arc_milestone_problems: list[ArcProblem] = []
     for milestone_letter in ('B', 'C', 'D'):

@@ -202,16 +202,16 @@
         "name": "donut_recoloring",
         "transformation_rounds": [
             {
-                "num_times": 1,
+                "num_times": 3,
                 "transformations": [
-                    "recolor_donut_frame",
+                    "recolor_a_donut_frame",
                     "no_change"
                 ]
             },
             {
-                "num_times": 1,
+                "num_times": 3,
                 "transformations": [
-                    "recolor_donut_interior",
+                    "recolor_a_donut_interior",
                     "no_change"
                 ]
             },
