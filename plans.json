@@ -1,7 +1,6 @@
 [
     {
         "name": "divide_combine",
-        "mea": [],
         "transformation_rounds": [
             {
                 "num_times": 1,
@@ -28,10 +27,6 @@
     },
     {
         "name": "reflections",
-        "mea": ["input_always_subset_of_output"],
-        "pre_info_gathering": [
-            "input_dimensions"
-        ],
         "transformation_rounds": [
             {
                 "num_times": 1,
@@ -42,6 +37,38 @@
             },
             {
                 "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal"],
+                "transformations": [
+                    "reflection",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal"],
+                "transformations": [
+                    "concat_all_combos",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal"],
+                "transformations": [
+                    "reflection",
+                    "no_change"
+                ]
+            },
+            {
+                "num_times": 1,
+                "mea": ["in_progress_always_subset_of_goal"],
+                "transformations": [
+                    "concat_all_combos",
+                    "no_change"
+                ]
+            },
+                        {
+                "num_times": 1,
                 "transformations": [
                     "reflection",
                     "no_change"
@@ -50,21 +77,28 @@
             {
                 "num_times": 1,
                 "transformations": [
-                    "concat_all_combos"
+                    "concat_all_combos",
+                    "no_change"
+                ]
+            },
+                        {
+                "num_times": 1,
+                "transformations": [
+                    "reflection",
+                    "no_change"
                 ]
             },
             {
-                "num_times": 0,
+                "num_times": 1,
                 "transformations": [
-                    "reflection",
                     "concat_all_combos",
                     "no_change"
                 ]
             },
             {
-                "num_times": 0,
+                "num_times": 1,
                 "transformations": [
-                    "crop_to_m_n_of_input_dim",
+                    "crop_to_shared_output_dimensions",
                     "no_change"
                 ]
             }
@@ -72,10 +106,6 @@
     },
     {
         "name": "draw_lines_between_blobs",
-        "mea": ["always_closer_to_output"],
-        "pre_info_gathering": [
-            "find_blobs"
-        ],
         "transformation_rounds": [
             {
                 "num_times": 2,
@@ -96,7 +126,6 @@
     },
     {
         "name": "draw_lines_drawable_directions",
-        "mea": ["always_closer_to_output"],
         "transformation_rounds": [
             {
                 "num_times": 2,
@@ -116,7 +145,6 @@
     },
     {
         "name": "gravity",
-        "mea": ["always_closer_to_output"],
         "transformation_rounds": [
             {
                 "num_times": 10,
@@ -129,10 +157,6 @@
     },
     {
         "name": "make_graph",
-        "pre_info_gathering": [
-            "find_blobs",
-            "count_colors"
-        ],
         "transformation_rounds": [
             {
                 "num_times": 1,
@@ -159,9 +183,6 @@
     },
     {
         "name": "transform_blobs",
-        "pre_info_gathering":[
-            "find_blobs"
-        ],
         "transformation_rounds": [
             {
                 "num_times": 1,
@@ -176,9 +197,6 @@
     },
     {
         "name": "blob_reflections",
-        "pre_info_gathering": [
-            "find_blobs"
-        ],
         "transformation_rounds": [
             {
                 "num_times": 1,

@@ -7,6 +7,7 @@ from ArcAgent import (
     findPossibleReflection,
     makePlanAssignments,
     performPlan,
+    _shared_output_dimensions,
 )
 from runPlan import iter_nodes_with_paths
 
@@ -36,11 +37,12 @@ if __name__ == "__main__":
     )
 
     testInputMatrix = arc_problem.test_set().get_input_data().data()
+    shared_output_dims = _shared_output_dimensions(arc_problem)
 
     print(f"\n=== {arc_problem.problem_name()} : plans executed = {planAssignments} ===")
 
     for plan in planAssignments:
-        tree = performPlan(testInputMatrix, plan)
+        tree = performPlan(testInputMatrix, plan, None, shared_output_dims)
         nodes = [
             (path, node)
             for path, node in iter_nodes_with_paths(tree)

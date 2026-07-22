@@ -29,10 +29,10 @@ def makePlanAssignments(
     possibleReflection,
     possibleBlobReflection
 ):
-    # print("outputHasMoreLines", outputHasMoreLines)
-    # print("isDivisionCombine", isDivisionCombine)
-    # print("possibleReflection", possibleReflection)
-    # print("possibleBlobReflection", possibleBlobReflection)
+    print("outputHasMoreLines", outputHasMoreLines)
+    print("isDivisionCombine", isDivisionCombine)
+    print("possibleReflection", possibleReflection)
+    print("possibleBlobReflection", possibleBlobReflection)
     plansToExecute = []
     if (
         outputHasMoreLines == False and
@@ -48,21 +48,17 @@ def makePlanAssignments(
     ):
         plansToExecute.append("draw_lines_between_blobs")
         plansToExecute.append("draw_lines_drawable_directions")
-        plansToExecute.append("general")
-        plansToExecute.append("make_graph")
-    elif (
+    if (
         isDivisionCombine == True
     ):
         plansToExecute.append("divide_combine")
-    elif (
+    if (
         possibleReflection == True
     ):
-        plansToExecute.append("general")
-        plansToExecute.append("dialate_inscribe")
         plansToExecute.append("reflections")
     if possibleBlobReflection == True:
         plansToExecute.append("blob_reflections")
-    # print("plansToExecute", plansToExecute)
+    print("plansToExecute", plansToExecute)
     return plansToExecute
 
 
@@ -153,6 +149,15 @@ def findPossibleReflection(arc_problem: ArcProblem) -> bool:
     )
 
 
+def _shared_output_dimensions(arc_problem: ArcProblem):
+    """
+    Returns the (rows, cols) shape common to every training example's
+    output, or None if the training outputs don't all share one shape.
+    """
+    shapes = {arc_set.get_output_data().data().shape for arc_set in arc_problem.training_set()}
+    return shapes.pop() if len(shapes) == 1 else None
+
+
 def _connected_component_masks(matrix: np.ndarray) -> list:
     masks = []
     for color in np.unique(matrix):
@@ -203,14 +208,22 @@ def findPossibleBlobReflection(arc_problem: ArcProblem) -> bool:
     )
 
 
-def performPlan(input_matrix: np.ndarray, plan: str):
+def performPlan(input_matrix: np.ndarray, plan: str, goal_matrix, shared_output_dims=None):
     """
     Runs the named plan's transformation rounds (see plans.json) against
     a single input matrix and returns the resulting transform tree
     (the set of candidate output matrices produced by that plan, tagged
     with whatever metadata later matching steps need).
+
+    goal_matrix is the known correct output used for MEA pruning (pass the
+    training example's expected output, or None when there is no known
+    goal, e.g. for test input).
+
+    shared_output_dims is the (rows, cols) shape shared by every training
+    example's output (see _shared_output_dimensions), or None if there
+    isn't one.
     """
-    return runPlan(input_matrix, plan)
+    return runPlan(input_matrix, plan, goal_matrix, shared_output_dims)
 
 
 def markMatchingOutputs(transformTreesForEveryInputMatrix):
@@ -339,6 +352,7 @@ class ArcAgent:
         isDivisionCombine = findIfIsDivisionCombine(arc_problem)
         possibleReflection = findPossibleReflection(arc_problem)
         possibleBlobReflection = False #findPossibleBlobReflection(arc_problem)
+        shared_output_dims = _shared_output_dimensions(arc_problem)
 
         # Step 2 - Assign Plans According To Problem Type
         planAssignments = makePlanAssignments(
@@ -360,7 +374,7 @@ class ArcAgent:
                 inputMatrix = arc_set.get_input_data().data()
                 expectedOutput = arc_set.get_output_data().data()
                 transformTreePerPlan.append(
-                    (performPlan(inputMatrix, plan), expectedOutput)
+                    (performPlan(inputMatrix, plan, expectedOutput, shared_output_dims), expectedOutput)
                 )
 
             transformTreesForEveryInputMatrix.append(transformTreePerPlan)
@@ -373,12 +387,13 @@ class ArcAgent:
         transformTreesForEveryInputMatrix = markMatchingOutputs(transformTreesForEveryInputMatrix)
         dbg(f"{arc_problem.problem_name()}: step 4 (mark matching outputs) took {(time.perf_counter() - step4_start) * 1000:.1f} ms")
 
+        example_match_summaries = []
         for plan_idx, plan in enumerate(planAssignments):
             for example_idx, (tree, _) in enumerate(transformTreesForEveryInputMatrix[plan_idx]):
                 nodes = list(iter_nodes_with_paths(tree))
                 matched_count = sum(1 for _, node in nodes if node.matched)
                 total_count = sum(1 for _, node in nodes if node.result is not None)
-                # print(f"{arc_problem.problem_name()}: plan '{plan}' example {example_idx + 1}: {matched_count}/{total_count} nodes matched")
+                example_match_summaries.append((plan, example_idx, matched_count, total_count))
 
         # Step 4 - Find index matches
         index_matches = find_index_matches(transformTreesForEveryInputMatrix)
@@ -407,7 +422,7 @@ class ArcAgent:
         plansAppliedToTestInputMatrix = []
         for plan in planAssignments:
             plan_start = time.perf_counter()
-            plansAppliedToTestInputMatrix.append(performPlan(testInputMatrix, plan))
+            plansAppliedToTestInputMatrix.append(performPlan(testInputMatrix, plan, None, shared_output_dims))
             dbg(f"{arc_problem.problem_name()}: [test] plan '{plan}' took {(time.perf_counter() - plan_start) * 1000:.1f} ms")
 
         dbg(f"{arc_problem.problem_name()}: step 7 (apply plans to test input) total {(time.perf_counter() - step7_start) * 1000:.1f} ms")
@@ -439,5 +454,9 @@ class ArcAgent:
             prediction_matches.append(prediction_matches[-1])
 
         self.last_prediction_matches = prediction_matches
+
+        if ARC_DEBUG:
+            for plan, example_idx, matched_count, total_count in example_match_summaries:
+                print(f"[DEBUG] example {example_idx + 1}, plan '{plan}' has {matched_count} out of {total_count} transformed matrices matching the goal matrix")
 
         return predictions  # a list[np.ndarray] of size 3

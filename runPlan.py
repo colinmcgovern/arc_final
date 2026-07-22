@@ -9,6 +9,7 @@ from runTransformation import (
     _generate_list_of_same_color_blobs,
     get_and_reset_transform_timings,
 )
+from PerformMea import PerformMea
 
 ARC_DEBUG = os.environ.get("ARC_DEBUG", "1") != "0"
 
@@ -23,6 +24,17 @@ with open(os.path.join(os.path.dirname(__file__), "plans.json")) as _f:
 
 _PLANS_BY_NAME = {plan["name"]: plan for plan in PLANS}
 
+with open(os.path.join(os.path.dirname(__file__), "transformations.json")) as _f:
+    TRANSFORMATIONS = json.load(_f)
+
+_TRANSFORMATIONS_BY_NAME = {t["name"]: t for t in TRANSFORMATIONS}
+
+# transformations whose outputs should not be expanded any further (see
+# "has_no_children" in transformations.json)
+HAS_NO_CHILDREN_TRANSFORMATIONS = {
+    t["name"] for t in TRANSFORMATIONS if t.get("has_no_children", False)
+}
+
 # these transformations combine several sibling matrices together rather than
 # expanding a single matrix into many candidates - see transformation_rounds
 # in plans.json (e.g. "divide" then "logic_combine"/"stack_combine")
@@ -35,7 +47,11 @@ COORDINATE_TRANSFORMATIONS = {"draw_line_between_points", "draw_drawable_lines"}
 
 # transformations that need the tree's original (pre-transformation) input
 # matrix as their "parameters"
-ROOT_INPUT_TRANSFORMATIONS = {"apply_original_input"}
+ROOT_INPUT_TRANSFORMATIONS = {"apply_original_input", "crop_to_m_n_of_input_dim"}
+
+# transformations that need the (rows, cols) shape shared by every training
+# example's output as their "parameters" (see shared_output_dims in runPlan())
+SHARED_OUTPUT_DIM_TRANSFORMATIONS = {"crop_to_shared_output_dimensions"}
 
 MAX_SECONDS_PER_PLAN = 60
 
@@ -45,7 +61,7 @@ _TIME_ROOT_PATTERN = 0.0
 
 
 class TransformationNode:
-    def __init__(self, name, params, result, tags=None, parent=None):
+    def __init__(self, name, params, result, tags=None, parent=None, is_dead_end=False, has_no_children=False):
         self.name = name
         self.params = params
         self.result = result
@@ -53,6 +69,8 @@ class TransformationNode:
         self.parent = parent
         self.children = []
         self.matched = False
+        self.is_dead_end = is_dead_end
+        self.has_no_children = has_no_children
 
 
 def iter_nodes_with_paths(root):
@@ -189,7 +207,7 @@ def _root_pattern_found_anywhere(root_matrix, output_matrix):
     return bool(np.any(np.all(matches, axis=(-2, -1))))
 
 
-def _make_children(parent_node, transformation_name, matrices, tags_list):
+def _make_children(parent_node, transformation_name, matrices, tags_list, mea_types, goal_matrix):
     global _TIME_ROOT_PATTERN
     new_nodes = []
     root_matrix = _find_root(parent_node).result
@@ -203,8 +221,14 @@ def _make_children(parent_node, transformation_name, matrices, tags_list):
             matrix,
             tags={**parent_node.tags, **tags, **root_tags, "transform": transformation_name},
             parent=parent_node,
+            has_no_children=transformation_name in HAS_NO_CHILDREN_TRANSFORMATIONS,
         )
         parent_node.children.append(child)
+        if goal_matrix is not None and mea_types:
+            for mea_type in mea_types:
+                if not PerformMea(root_matrix, parent_node.result, matrix, goal_matrix, mea_type):
+                    child.is_dead_end = True
+                    break
         new_nodes.append(child)
     return new_nodes
 
@@ -221,7 +245,7 @@ def _group_by_parent(frontier):
     return [groups[key] for key in order]
 
 
-def _run_rounds(frontier, transformation_rounds, coords, start_time):
+def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix, shared_output_dims=None):
     """
     Advances frontier through transformation_rounds (a plan's
     "transformation_rounds" list), building children onto whatever tree the
@@ -229,9 +253,12 @@ def _run_rounds(frontier, transformation_rounds, coords, start_time):
     Returns (frontier, time_exceeded) where time_exceeded is True if
     MAX_SECONDS_PER_PLAN was hit partway through.
     """
+    frontier = [node for node in frontier if not node.is_dead_end and not node.has_no_children]
+
     for round_idx, round_spec in enumerate(transformation_rounds):
         num_times = round_spec.get("num_times", 0)
         transformation_names = round_spec.get("transformations", [])
+        mea_types = round_spec.get("mea", [])
 
         for iteration in range(num_times):
             if time.time() - start_time > MAX_SECONDS_PER_PLAN:
@@ -256,13 +283,15 @@ def _run_rounds(frontier, transformation_rounds, coords, start_time):
                         except Exception:
                             continue
                         matrices, tags_list = _normalize_transformation_output(output, tags)
-                        new_frontier.extend(_make_children(host, transformation_name, matrices, tags_list))
+                        new_frontier.extend(_make_children(host, transformation_name, matrices, tags_list, mea_types, goal_matrix))
                 else:
                     for node in frontier:
                         if transformation_name in COORDINATE_TRANSFORMATIONS:
                             parameters = coords
                         elif transformation_name in ROOT_INPUT_TRANSFORMATIONS:
                             parameters = [_find_root(node).result]
+                        elif transformation_name in SHARED_OUTPUT_DIM_TRANSFORMATIONS:
+                            parameters = [shared_output_dims] if shared_output_dims else []
                         else:
                             parameters = []
                         try:
@@ -270,25 +299,39 @@ def _run_rounds(frontier, transformation_rounds, coords, start_time):
                         except Exception:
                             continue
                         matrices, tags_list = _normalize_transformation_output(output, tags)
-                        new_frontier.extend(_make_children(node, transformation_name, matrices, tags_list))
+                        new_frontier.extend(_make_children(node, transformation_name, matrices, tags_list, mea_types, goal_matrix))
 
                 dbg(f"round {round_idx} iteration {iteration}: transformation '{transformation_name}' took "
                     f"{(time.time() - transform_start) * 1000:.1f} ms, produced {len(new_frontier) - before_count} nodes")
 
-            frontier = new_frontier
+            dead_end_count = sum(1 for node in new_frontier if node.is_dead_end)
+            dbg(f"round {round_idx} iteration {iteration}: {dead_end_count} of {len(new_frontier)} nodes marked is_dead_end = True")
+
+            frontier = [node for node in new_frontier if not node.is_dead_end and not node.has_no_children]
             if not frontier:
                 return frontier, False
 
     return frontier, False
 
 
-def runPlan(input_matrix, plan_name):
+def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None):
     """
     Runs the named plan (see plans.json) against input_matrix, building and
     returning the root of a TransformationNode tree of every candidate matrix
     the plan's transformation_rounds can produce. The "every_end" plan's
     transformation_rounds are then appended onto the resulting frontier, so
     every plan finishes with those rounds regardless of plan_name.
+
+    goal_matrix is the known correct output to check the plan's progress
+    against via PerformMea (see the "mea" key on individual entries of
+    plan["transformation_rounds"] in plans.json), and is only available for
+    training examples. Pass None when there is no known goal (e.g. when
+    running against test input) to skip MEA checks entirely.
+
+    shared_output_dims is the (rows, cols) shape shared by every training
+    example's output (see SHARED_OUTPUT_DIM_TRANSFORMATIONS), or None if no
+    such shared shape exists. It's the same across training and test-input
+    runs of a given problem, unlike goal_matrix.
     """
     global _TIME_ROOT_PATTERN
     _TIME_ROOT_PATTERN = 0.0
@@ -306,7 +349,7 @@ def runPlan(input_matrix, plan_name):
     start_time = time.time()
 
     rounds_start = time.time()
-    frontier, time_exceeded = _run_rounds(frontier, plan.get("transformation_rounds", []), coords, start_time)
+    frontier, time_exceeded = _run_rounds(frontier, plan.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims)
     dbg(f"plan '{plan_name}': primary rounds took {(time.time() - rounds_start) * 1000:.1f} ms, "
         f"time_exceeded={time_exceeded}, final frontier size {len(frontier)}")
     if time_exceeded or not frontier:
@@ -315,7 +358,7 @@ def runPlan(input_matrix, plan_name):
 
     every_end_start = time.time()
     every_end = _get_plan("every_end")
-    _run_rounds(frontier, every_end.get("transformation_rounds", []), coords, start_time)
+    _run_rounds(frontier, every_end.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims)
     dbg(f"plan '{plan_name}': every_end rounds took {(time.time() - every_end_start) * 1000:.1f} ms")
 
     _report_plan_timings(plan_name)

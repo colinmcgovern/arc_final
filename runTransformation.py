@@ -701,13 +701,114 @@ def concat_all_combos(input_matrix: np.ndarray, parameters: list):
     matrix_list = [input_matrix] + list(parameters)
     return _generate_block_combinations(matrix_list)
 
+# this crops the matrix based on the dimenstions of the original root matrix
+# the root matrix is inputted via the parameters
+# example 1
+# root matrix:
+# 1 1
+# 1 1
+# input matrix
+# 1 2 3 4
+# 1 2 3 4
+# 1 2 3 4
+# 1 2 3 4
+# # 
+# 1 2
+# 1 2
 
+# 3 4 
+# 3 4
+
+# 1 2
+# 1 2
+
+# 1 2
+# 1 2
+
+# 3 4
+# 3 4
+
+# 1 2 3 4
+# 1 2 3 4
+# 1 2 3 4
+# 1 2 3 4
+
+# example 2
+# # root matrix:
+# 1
+# input matrix
+# 1 2 3
+# 1 2 3
+# 1 2 3
+# outputs
+# 1 
+
+# 2
+
+# 3 
+
+# 1 
+
+# 2
+
+# 3 
+
+# 1 
+
+# 2 
+
+# 3
+
+# 1 2
+# 1 2
+
+# 2 3
+# 2 3
+
+# 1 2
+# 1 2
+
+# 2 3
+# 2 3
+
+# 1 2 3
+# 1 2 3
+# 1 2 3
 def crop_to_m_n_of_input_dim(input_matrix: np.ndarray, parameters: list):
     """
-    Placeholder for the "crop_to_m_n_of_input_dim" transformation (see transformations.json).
-    No equivalent logic exists in OLD_ArcAgent.py.
+    Crops input_matrix into a grid of tiles sized as multiples of the root
+    matrix's shape (parameters[0]). For each k from 1 up to
+    min(input_rows // root_rows, input_cols // root_cols), tiles input_matrix
+    into a grid of (root_rows*k, root_cols*k)-sized pieces (skipping any k
+    whose tile size doesn't evenly divide input_matrix's shape), returning
+    every tile across every valid k as a separate output. The last k
+    (min ratio) always yields the whole input_matrix as a single tile.
     """
-    raise NotImplementedError
+    if not parameters:
+        return input_matrix
+
+    root_matrix = parameters[0]
+    root_rows, root_cols = root_matrix.shape
+    input_rows, input_cols = input_matrix.shape
+    if root_rows <= 0 or root_cols <= 0:
+        return input_matrix
+
+    row_ratio = input_rows // root_rows
+    col_ratio = input_cols // root_cols
+    if row_ratio == 0 or col_ratio == 0:
+        return input_matrix
+
+    result = []
+    for k in range(1, min(row_ratio, col_ratio) + 1):
+        tile_h = root_rows * k
+        tile_w = root_cols * k
+        if input_rows % tile_h != 0 or input_cols % tile_w != 0:
+            continue
+        for r_start in range(0, input_rows, tile_h):
+            for c_start in range(0, input_cols, tile_w):
+                result.append(input_matrix[r_start:r_start + tile_h, c_start:c_start + tile_w])
+
+    return result if result else input_matrix
 
 # this function takes in the input matrix and makes bar graphs according to aspects
 # about the matrix. 
@@ -730,6 +831,52 @@ def make_graph(input_matrix: np.ndarray, parameters: list):
     pixel_counts = _color_pixel_counts(input_matrix)
     blob_counts = _color_blob_counts(input_matrix)
     return [_build_bar_graph(pixel_counts), _build_bar_graph(blob_counts)]
+
+# This crops the input matrix to the shared dimensions of the output
+# matrix for each of the examples
+# if there are no shared dimensions of the output matrix then skip this transformation
+# example 1
+# Lets say the shared output matrix is size 2x2
+# input
+# 1 2 3
+# 1 2 3
+# 4 4 4
+
+# outputs
+# 1 2
+# 1 2
+
+# 2 3
+# 2 3
+
+# 1 2
+# 4 4
+
+# 2 3
+# 4 4
+def crop_to_shared_output_dimensions(input_matrix: np.ndarray, parameters: list):
+    """
+    Crops input_matrix into every overlapping (rows, cols)-sized window, where
+    (rows, cols) = parameters[0] is the shape shared by every training
+    example's output. Slides the window across all valid row/col offsets
+    (stride 1), returning each crop as a separate candidate output. Returns
+    input_matrix unchanged if parameters is empty (no shared output shape
+    was found) or the shared shape doesn't fit inside input_matrix.
+    """
+    if not parameters or not parameters[0]:
+        return input_matrix
+
+    tile_h, tile_w = parameters[0]
+    input_rows, input_cols = input_matrix.shape
+    if tile_h <= 0 or tile_w <= 0 or tile_h > input_rows or tile_w > input_cols:
+        return input_matrix
+
+    result = []
+    for r_start in range(input_rows - tile_h + 1):
+        for c_start in range(input_cols - tile_w + 1):
+            result.append(input_matrix[r_start:r_start + tile_h, c_start:c_start + tile_w])
+
+    return result if result else input_matrix
 
 
 def fill_blobs(input_matrix: np.ndarray, parameters: list):
@@ -841,6 +988,7 @@ TRANSFORMATION_FUNCTIONS = {
     "no_change": no_change,
     "concat_all_combos": concat_all_combos,
     "crop_to_m_n_of_input_dim": crop_to_m_n_of_input_dim,
+    "crop_to_shared_output_dimensions": crop_to_shared_output_dimensions,
     "make_graph": make_graph,
     "fill_blobs": fill_blobs,
     "recolor_donuts": recolor_donuts,
