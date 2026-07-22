@@ -400,27 +400,31 @@ def _build_bar_graph(color_values: dict) -> np.ndarray:
     return graph
 
 
-def _generate_ring_recolors(matrix_list, use_holes):
+def _compute_ring_mask(matrix, use_holes):
+    ring = np.zeros(matrix.shape, dtype=bool)
+    for color in np.unique(matrix):
+        if color == 0:
+            continue
+        mask = (matrix == color)
+        labeled, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
+        for label_id in range(1, n_features + 1):
+            blob_mask = labeled == label_id
+            if use_holes:
+                region = ndimage.binary_fill_holes(blob_mask) & ~blob_mask
+                eroded = ndimage.binary_erosion(region, structure=_RING_STRUCT)
+                ring |= region & ~eroded
+            else:
+                dilated = ndimage.binary_dilation(blob_mask, structure=_RING_STRUCT)
+                ring |= dilated & ~blob_mask
+    return ring
+
+
+def _generate_ring_recolors(matrix_list, ring_mask):
     result = []
     for m in matrix_list:
-        ring = np.zeros(m.shape, dtype=bool)
-        for color in np.unique(m):
-            if color == 0:
-                continue
-            mask = (m == color)
-            labeled, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
-            for label_id in range(1, n_features + 1):
-                blob_mask = labeled == label_id
-                if use_holes:
-                    region = ndimage.binary_fill_holes(blob_mask) & ~blob_mask
-                    eroded = ndimage.binary_erosion(region, structure=_RING_STRUCT)
-                    ring |= region & ~eroded
-                else:
-                    dilated = ndimage.binary_dilation(blob_mask, structure=_RING_STRUCT)
-                    ring |= dilated & ~blob_mask
         for fill_color in range(10):
             out = m.copy()
-            out[ring] = fill_color
+            out[ring_mask] = fill_color
             result.append(out)
     return result
 
@@ -463,6 +467,23 @@ def _find_donuts(matrix: np.ndarray) -> list:
     return donuts
 
 
+def _compute_root_geometry(matrix: np.ndarray) -> dict:
+    """
+    Detects every blob/donut feature once, from the puzzle's root (pre-
+    transformation) input matrix, so blob/donut-based transformations use
+    fixed geometry for the whole plan run instead of re-detecting blobs on
+    whatever matrix a given search branch currently holds.
+    """
+    return {
+        "same_color_blobs": _generate_list_of_same_color_blobs([matrix]),
+        "extracted_colors": _generate_extracted_colors([matrix]),
+        "dilate_ring_mask": _compute_ring_mask(matrix, use_holes=False),
+        "inscribe_ring_mask": _compute_ring_mask(matrix, use_holes=True),
+        "donuts": _find_donuts(matrix),
+        "blob_counts": _color_blob_counts(matrix),
+    }
+
+
 # --- transformation subfunctions (see transformations.json) ---
 
 def reflection(input_matrix: np.ndarray, parameters: list):
@@ -484,11 +505,13 @@ def rotation(input_matrix: np.ndarray, parameters: list):
 def extract_blobs(input_matrix: np.ndarray, parameters: list):
     """
     Extracts connected-component blobs of the same color (padded to 15),
-    followed by a per-color mask (10, one per color 0-9).
+    followed by a per-color mask (10, one per color 0-9). Blobs are detected
+    once from the puzzle's root input matrix (see parameters/root_geometry),
+    not from input_matrix.
     Adapted from generate_list_of_same_color_blobs and generate_extracted_colors
     in OLD_ArcAgent.py.
     """
-    return _generate_list_of_same_color_blobs([input_matrix]) + _generate_extracted_colors([input_matrix])
+    return parameters["same_color_blobs"] + parameters["extracted_colors"]
 
 
 def divide(input_matrix: np.ndarray, parameters: list):
@@ -537,9 +560,11 @@ def triple_divide(input_matrix: np.ndarray, parameters: list):
 def dialate(input_matrix: np.ndarray, parameters: list):
     """
     For each same-color blob (excluding background 0), recolors the ring of
-    pixels immediately surrounding it, once per candidate color 0-9.
+    pixels immediately surrounding it, once per candidate color 0-9. The ring
+    is computed once from the puzzle's root input matrix (see
+    parameters/root_geometry) and applied onto the current input_matrix.
     """
-    return _generate_ring_recolors([input_matrix], use_holes=False)
+    return _generate_ring_recolors([input_matrix], parameters["dilate_ring_mask"])
 
 # input is a matrix and the output is multiple matrixes with a border drawn within each blob of each color
 # for example the input
@@ -567,9 +592,11 @@ def dialate(input_matrix: np.ndarray, parameters: list):
 def inscribe(input_matrix: np.ndarray, parameters: list):
     """
     For each same-color blob (excluding background 0), recolors the inner
-    ring of any enclosed hole, once per candidate color 0-9.
+    ring of any enclosed hole, once per candidate color 0-9. The ring is
+    computed once from the puzzle's root input matrix (see
+    parameters/root_geometry) and applied onto the current input_matrix.
     """
-    return _generate_ring_recolors([input_matrix], use_holes=True)
+    return _generate_ring_recolors([input_matrix], parameters["inscribe_ring_mask"])
 
 # This function recolors only one donut at a time from in input matrix
 # and outputs the new color for each of the possible colors
@@ -626,9 +653,10 @@ def recolor_a_donut_frame(input_matrix: np.ndarray, parameters: list):
     _find_donuts), recolors just that donut's frame, once per candidate
     color 0-9, leaving any other donuts untouched. Tags note the donut's
     original/new color and whether the new color matches the most common
-    color within the donut's interior.
+    color within the donut's interior. Donuts are detected once from the
+    puzzle's root input matrix (see parameters/root_geometry).
     """
-    donuts = _find_donuts(input_matrix)
+    donuts = parameters["donuts"]
     result = []
     tags_list = []
     for i, donut in enumerate(donuts):
@@ -704,8 +732,10 @@ def recolor_a_donut_interior(input_matrix: np.ndarray, parameters: list):
     untouched. Tags note the donut's frame color, the interior's most common
     color before recoloring, the new fill color, whether the fill matches
     the most common interior color, and whether it matches the frame color.
+    Donuts are detected once from the puzzle's root input matrix (see
+    parameters/root_geometry).
     """
-    donuts = _find_donuts(input_matrix)
+    donuts = parameters["donuts"]
     result = []
     tags_list = []
     for i, donut in enumerate(donuts):
@@ -1015,12 +1045,15 @@ def crop_to_m_n_of_input_dim(input_matrix: np.ndarray, parameters: list):
 # 1 2 3
 def make_graph(input_matrix: np.ndarray, parameters: list):
     """
-    Builds two bar-graph matrices from input_matrix: one showing pixel count
-    per non-background color, one showing blob count per non-background
-    color. Columns are sorted by color ascending; bars fill bottom-up.
+    Builds two bar-graph matrices: one showing pixel count per non-background
+    color in the current input_matrix, one showing blob count per
+    non-background color in the puzzle's root input matrix (see
+    parameters/root_geometry - blob counts are fixed for the puzzle, not
+    re-detected from input_matrix). Columns are sorted by color ascending;
+    bars fill bottom-up.
     """
     pixel_counts = _color_pixel_counts(input_matrix)
-    blob_counts = _color_blob_counts(input_matrix)
+    blob_counts = parameters["blob_counts"]
     return [_build_bar_graph(pixel_counts), _build_bar_graph(blob_counts)]
 
 # This crops the input matrix to the shared dimensions of the output
@@ -1073,7 +1106,10 @@ def crop_to_shared_output_dimensions(input_matrix: np.ndarray, parameters: list)
 def fill_blobs(input_matrix: np.ndarray, parameters: list):
     """
     Placeholder for the "fill_blobs" transformation (see transformations.json).
-    No equivalent logic exists in OLD_ArcAgent.py.
+    No equivalent logic exists in OLD_ArcAgent.py. Once implemented, should
+    consume parameters["same_color_blobs"] (root-fixed, see
+    _compute_root_geometry) instead of re-detecting blobs from input_matrix,
+    and be added to ROOT_GEOMETRY_TRANSFORMATIONS in runPlan.py.
     """
     raise NotImplementedError
 
@@ -1081,7 +1117,10 @@ def fill_blobs(input_matrix: np.ndarray, parameters: list):
 def recolor_donuts(input_matrix: np.ndarray, parameters: list):
     """
     Placeholder for the "recolor_donuts" transformation (see transformations.json).
-    No equivalent logic exists in OLD_ArcAgent.py.
+    No equivalent logic exists in OLD_ArcAgent.py. Once implemented, should
+    consume parameters["donuts"] (root-fixed, see _compute_root_geometry)
+    instead of re-detecting donuts from input_matrix, and be added to
+    ROOT_GEOMETRY_TRANSFORMATIONS in runPlan.py.
     """
     raise NotImplementedError
 
@@ -1239,6 +1278,7 @@ TRANSFORMATION_FUNCTIONS = {
     "fill_blobs": fill_blobs,
     "recolor_donuts": recolor_donuts,
     "recolor_a_donut_frame": recolor_a_donut_frame,
+    "recolor_a_donut_interior": recolor_a_donut_interior,
     "reflect_over_lines": reflect_over_lines,
     "remove_touching": remove_touching,
     "apply_original_input": apply_original_input,

@@ -7,6 +7,7 @@ import numpy as np
 from runTransformation import (
     runTransformation,
     _generate_list_of_same_color_blobs,
+    _compute_root_geometry,
     get_and_reset_transform_timings,
 )
 from PerformMea import PerformMea
@@ -48,6 +49,15 @@ COORDINATE_TRANSFORMATIONS = {"draw_line_between_points", "draw_drawable_lines"}
 # transformations that need the tree's original (pre-transformation) input
 # matrix as their "parameters"
 ROOT_INPUT_TRANSFORMATIONS = {"apply_original_input", "crop_to_m_n_of_input_dim"}
+
+# transformations that need blobs/donuts detected once from the root
+# (pre-transformation) input matrix as their "parameters" (see
+# _compute_root_geometry in runTransformation.py) - fixed for the whole
+# plan run instead of re-detected from each node's own evolving matrix
+ROOT_GEOMETRY_TRANSFORMATIONS = {
+    "extract_blobs", "dialate", "inscribe",
+    "recolor_a_donut_frame", "recolor_a_donut_interior", "make_graph",
+}
 
 # transformations that need the (rows, cols) shape shared by every training
 # example's output as their "parameters" (see shared_output_dims in runPlan())
@@ -265,7 +275,7 @@ def _group_by_parent(frontier):
     return [groups[key] for key in order]
 
 
-def _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_matrix, shared_output_dims):
+def _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_matrix, shared_output_dims, root_geometry=None):
     """
     Applies one round-iteration's transformation_names to frontier, returning
     the newly created child nodes. COMBINE_TRANSFORMATIONS are applied once
@@ -298,6 +308,8 @@ def _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_m
                     parameters = [_find_root(node).result]
                 elif transformation_name in SHARED_OUTPUT_DIM_TRANSFORMATIONS:
                     parameters = [shared_output_dims] if shared_output_dims else []
+                elif transformation_name in ROOT_GEOMETRY_TRANSFORMATIONS:
+                    parameters = root_geometry
                 else:
                     parameters = []
                 try:
@@ -313,7 +325,7 @@ def _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_m
     return new_frontier
 
 
-def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix, shared_output_dims=None, frontier_size_limit=None):
+def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix, shared_output_dims=None, frontier_size_limit=None, root_geometry=None):
     """
     Advances frontier through transformation_rounds (a plan's
     "transformation_rounds" list), building children onto whatever tree the
@@ -334,7 +346,7 @@ def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix
                 return frontier, True
 
             dbg(f"round {round_idx} iteration {iteration}: starting with frontier size {len(frontier)}")
-            new_frontier = _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_matrix, shared_output_dims)
+            new_frontier = _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_matrix, shared_output_dims, root_geometry)
 
             if frontier_size_limit is not None and len(new_frontier) > frontier_size_limit:
                 _mark_non_unique_dead_ends(new_frontier)
@@ -385,10 +397,12 @@ def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None, front
     coords = _find_important_coordinates(input_matrix)
     dbg(f"plan '{plan_name}': _find_important_coordinates took {(time.time() - coord_start) * 1000:.1f} ms, found {len(coords)} coords")
 
+    root_geometry = _compute_root_geometry(input_matrix)
+
     start_time = time.time()
 
     rounds_start = time.time()
-    frontier, time_exceeded = _run_rounds(frontier, plan.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims, frontier_size_limit)
+    frontier, time_exceeded = _run_rounds(frontier, plan.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims, frontier_size_limit, root_geometry)
     dbg(f"plan '{plan_name}': primary rounds took {(time.time() - rounds_start) * 1000:.1f} ms, "
         f"time_exceeded={time_exceeded}, final frontier size {len(frontier)}")
     if time_exceeded or not frontier:
@@ -397,7 +411,7 @@ def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None, front
 
     every_end_start = time.time()
     every_end = _get_plan("every_end")
-    _run_rounds(frontier, every_end.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims, frontier_size_limit)
+    _run_rounds(frontier, every_end.get("transformation_rounds", []), coords, start_time, goal_matrix, shared_output_dims, frontier_size_limit, root_geometry)
     dbg(f"plan '{plan_name}': every_end rounds took {(time.time() - every_end_start) * 1000:.1f} ms")
 
     _report_plan_timings(plan_name)
@@ -429,6 +443,7 @@ def replayPlanPath(input_matrix, plan_name, path, shared_output_dims=None):
     root = TransformationNode("input", {}, input_matrix)
 
     coords = _find_important_coordinates(input_matrix)
+    root_geometry = _compute_root_geometry(input_matrix)
     start_time = time.time()
 
     all_rounds = list(plan.get("transformation_rounds", [])) + list(_get_plan("every_end").get("transformation_rounds", []))
@@ -448,7 +463,7 @@ def replayPlanPath(input_matrix, plan_name, path, shared_output_dims=None):
             dbg(f"plan '{plan_name}' (replay): MAX_SECONDS_PER_PLAN ({MAX_SECONDS_PER_PLAN}s) exceeded, aborting early")
             break
 
-        new_frontier = _run_one_iteration(frontier, transformation_names, [], coords, None, shared_output_dims)
+        new_frontier = _run_one_iteration(frontier, transformation_names, [], coords, None, shared_output_dims, root_geometry)
         if not new_frontier:
             break
 
