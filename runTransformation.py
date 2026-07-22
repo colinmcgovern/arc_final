@@ -903,12 +903,67 @@ def reflect_over_lines(input_matrix: np.ndarray, parameters: list):
     raise NotImplementedError
 
 
+# this outputs a matrix where all of the colors that touch are removed
+# example 1
+# input:
+# 0 1 2
+# 0 1 2
+# would output:
+# 0 1 0
+# 0 1 0
+# and
+# 0 0 2
+# 0 0 2
+
+# example 2
+# input:
+# 0 1 2 0
+# 0 1 0 0
+# would output:
+# 0 0 2 0
+# 0 1 0 0
+# and
+# 0 1 0 0
+# 0 1 0 0
+
+# example 3
+# input:
+# 0 1 0 2
+# 0 1 0 2
+# would output:
+# 0 1 0 2
+# 0 1 0 2
 def remove_touching(input_matrix: np.ndarray, parameters: list):
     """
-    Placeholder for the "remove_touching" transformation (see transformations.json).
-    No equivalent logic exists in OLD_ArcAgent.py.
+    For each non-background (non-zero) color present in input_matrix, builds
+    an output where that color's pixels touching (4-connected) a
+    differently-colored non-background pixel are zeroed out; pixels of other
+    colors are left unchanged. Colors with no touching pixels are skipped.
+    Returns input_matrix unchanged if no color touches a different color
+    anywhere in the matrix.
     """
-    raise NotImplementedError
+    colors = [c for c in np.unique(input_matrix) if c != 0]
+    padded = np.pad(input_matrix, 1, mode="constant", constant_values=0)
+    neighbors = [
+        padded[:-2, 1:-1],
+        padded[2:, 1:-1],
+        padded[1:-1, :-2],
+        padded[1:-1, 2:],
+    ]
+
+    result = []
+    for color in colors:
+        color_mask = input_matrix == color
+        touches_other = np.zeros_like(color_mask)
+        for neighbor in neighbors:
+            touches_other |= color_mask & (neighbor != 0) & (neighbor != color)
+        if not np.any(touches_other):
+            continue
+        output = input_matrix.copy()
+        output[touches_other] = 0
+        result.append(output)
+
+    return result if result else input_matrix
 
 # this function adds the original root input matrix to the output matrix 
 # it assumes that the 0 color is the background color and should be treated as transparent

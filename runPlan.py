@@ -245,6 +245,54 @@ def _group_by_parent(frontier):
     return [groups[key] for key in order]
 
 
+def _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_matrix, shared_output_dims):
+    """
+    Applies one round-iteration's transformation_names to frontier, returning
+    the newly created child nodes. COMBINE_TRANSFORMATIONS are applied once
+    per shared-parent sibling group (see _group_by_parent); every other
+    transformation is applied once per node in frontier independently.
+    """
+    new_frontier = []
+    sibling_groups = _group_by_parent(frontier)
+
+    for transformation_name in transformation_names:
+        transform_start = time.time()
+        before_count = len(new_frontier)
+        if transformation_name in COMBINE_TRANSFORMATIONS:
+            for siblings in sibling_groups:
+                if not siblings:
+                    continue
+                host = siblings[0]
+                other_matrices = [s.result for s in siblings[1:]]
+                try:
+                    output, tags = runTransformation(host.result, transformation_name, other_matrices)
+                except Exception:
+                    continue
+                matrices, tags_list = _normalize_transformation_output(output, tags)
+                new_frontier.extend(_make_children(host, transformation_name, matrices, tags_list, mea_types, goal_matrix))
+        else:
+            for node in frontier:
+                if transformation_name in COORDINATE_TRANSFORMATIONS:
+                    parameters = coords
+                elif transformation_name in ROOT_INPUT_TRANSFORMATIONS:
+                    parameters = [_find_root(node).result]
+                elif transformation_name in SHARED_OUTPUT_DIM_TRANSFORMATIONS:
+                    parameters = [shared_output_dims] if shared_output_dims else []
+                else:
+                    parameters = []
+                try:
+                    output, tags = runTransformation(node.result, transformation_name, parameters)
+                except Exception:
+                    continue
+                matrices, tags_list = _normalize_transformation_output(output, tags)
+                new_frontier.extend(_make_children(node, transformation_name, matrices, tags_list, mea_types, goal_matrix))
+
+        dbg(f"transformation '{transformation_name}' took "
+            f"{(time.time() - transform_start) * 1000:.1f} ms, produced {len(new_frontier) - before_count} nodes")
+
+    return new_frontier
+
+
 def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix, shared_output_dims=None):
     """
     Advances frontier through transformation_rounds (a plan's
@@ -266,43 +314,7 @@ def _run_rounds(frontier, transformation_rounds, coords, start_time, goal_matrix
                 return frontier, True
 
             dbg(f"round {round_idx} iteration {iteration}: starting with frontier size {len(frontier)}")
-            new_frontier = []
-            sibling_groups = _group_by_parent(frontier)
-
-            for transformation_name in transformation_names:
-                transform_start = time.time()
-                before_count = len(new_frontier)
-                if transformation_name in COMBINE_TRANSFORMATIONS:
-                    for siblings in sibling_groups:
-                        if not siblings:
-                            continue
-                        host = siblings[0]
-                        other_matrices = [s.result for s in siblings[1:]]
-                        try:
-                            output, tags = runTransformation(host.result, transformation_name, other_matrices)
-                        except Exception:
-                            continue
-                        matrices, tags_list = _normalize_transformation_output(output, tags)
-                        new_frontier.extend(_make_children(host, transformation_name, matrices, tags_list, mea_types, goal_matrix))
-                else:
-                    for node in frontier:
-                        if transformation_name in COORDINATE_TRANSFORMATIONS:
-                            parameters = coords
-                        elif transformation_name in ROOT_INPUT_TRANSFORMATIONS:
-                            parameters = [_find_root(node).result]
-                        elif transformation_name in SHARED_OUTPUT_DIM_TRANSFORMATIONS:
-                            parameters = [shared_output_dims] if shared_output_dims else []
-                        else:
-                            parameters = []
-                        try:
-                            output, tags = runTransformation(node.result, transformation_name, parameters)
-                        except Exception:
-                            continue
-                        matrices, tags_list = _normalize_transformation_output(output, tags)
-                        new_frontier.extend(_make_children(node, transformation_name, matrices, tags_list, mea_types, goal_matrix))
-
-                dbg(f"round {round_idx} iteration {iteration}: transformation '{transformation_name}' took "
-                    f"{(time.time() - transform_start) * 1000:.1f} ms, produced {len(new_frontier) - before_count} nodes")
+            new_frontier = _run_one_iteration(frontier, transformation_names, mea_types, coords, goal_matrix, shared_output_dims)
 
             dead_end_count = sum(1 for node in new_frontier if node.is_dead_end)
             dbg(f"round {round_idx} iteration {iteration}: {dead_end_count} of {len(new_frontier)} nodes marked is_dead_end = True")
@@ -362,6 +374,68 @@ def runPlan(input_matrix, plan_name, goal_matrix, shared_output_dims=None):
     dbg(f"plan '{plan_name}': every_end rounds took {(time.time() - every_end_start) * 1000:.1f} ms")
 
     _report_plan_timings(plan_name)
+
+    return root
+
+
+def replayPlanPath(input_matrix, plan_name, path, shared_output_dims=None):
+    """
+    Rebuilds only the nodes needed to reach `path` (a child-index tuple, as
+    found by find_index_matches on a training tree) against input_matrix,
+    instead of the full multi-branch tree runPlan() would build for every
+    transformation choice at every round.
+
+    A node's children only depend on that node's own result, so replaying
+    just the single lineage of nodes leading to `path` reproduces the exact
+    same node runPlan(input_matrix, plan_name, None, shared_output_dims)
+    would have built at that path - except across COMBINE_TRANSFORMATIONS
+    rounds (logic_combine, stack_combine, ...), which need every sibling
+    produced by the previous round for the same parent. So the frontier is
+    only narrowed down to the single node continuing the path when the
+    *next* round-iteration doesn't combine; otherwise the full sibling
+    group produced this iteration is carried forward.
+
+    Returns the tree root; get_node_at_path(root, path) yields the replayed
+    node.
+    """
+    plan = _get_plan(plan_name)
+    root = TransformationNode("input", {}, input_matrix)
+
+    coords = _find_important_coordinates(input_matrix)
+    start_time = time.time()
+
+    all_rounds = list(plan.get("transformation_rounds", [])) + list(_get_plan("every_end").get("transformation_rounds", []))
+    flat_steps = [
+        round_spec.get("transformations", [])
+        for round_spec in all_rounds
+        for _ in range(round_spec.get("num_times", 0))
+    ]
+
+    frontier = [root]
+    path_pos = 0
+
+    for step_idx, transformation_names in enumerate(flat_steps):
+        if not frontier or path_pos >= len(path):
+            break
+        if time.time() - start_time > MAX_SECONDS_PER_PLAN:
+            dbg(f"plan '{plan_name}' (replay): MAX_SECONDS_PER_PLAN ({MAX_SECONDS_PER_PLAN}s) exceeded, aborting early")
+            break
+
+        new_frontier = _run_one_iteration(frontier, transformation_names, [], coords, None, shared_output_dims)
+        if not new_frontier:
+            break
+
+        idx = path[path_pos]
+        path_pos += 1
+        if idx < 0 or idx >= len(new_frontier):
+            # path isn't resolvable against this input - shouldn't happen for
+            # a genuine index match, stop here with whatever was built
+            break
+
+        next_names = flat_steps[step_idx + 1] if step_idx + 1 < len(flat_steps) else []
+        next_is_combine = any(name in COMBINE_TRANSFORMATIONS for name in next_names)
+        frontier = new_frontier if next_is_combine else [new_frontier[idx]]
+        frontier = [node for node in frontier if not node.is_dead_end and not node.has_no_children]
 
     return root
 

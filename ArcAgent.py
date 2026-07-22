@@ -7,7 +7,7 @@ from scipy import ndimage
 from ArcProblem import ArcProblem
 from ArcData import ArcData
 from ArcSet import ArcSet
-from runPlan import runPlan, iter_nodes_with_paths, get_node_at_path
+from runPlan import runPlan, replayPlanPath, iter_nodes_with_paths, get_node_at_path
 from runTransformation import _count_lines_by_direction
 
 ARC_DEBUG = os.environ.get("ARC_DEBUG", "1") != "0"
@@ -284,7 +284,7 @@ def _pixel_diff_count(input_matrix, result):
     return int(np.sum(input_matrix != result))
 
 
-def applyAndSort(plansAppliedToTestInputMatrix, index_matches, tag_matches, planAssignments) -> list[tuple[np.ndarray, dict]]:
+def applyAndSort(plansAppliedToTestInputMatrix, tag_matches, planAssignments) -> list[tuple[np.ndarray, dict]]:
     """
     Uses the index and tag matches found from the training examples to
     pick out the corresponding candidate matrices from the test input's
@@ -292,20 +292,32 @@ def applyAndSort(plansAppliedToTestInputMatrix, index_matches, tag_matches, plan
     highest to lowest predicted quality. match_info records which tier
     produced the candidate (index or tag) and how it matched (the shared
     path, or the shared tags).
+
+    plansAppliedToTestInputMatrix holds one (kind, payload) pair per plan:
+    kind "index" pairs with a list of (path, replayed_root) - one small,
+    path-guided tree per matched path (see replayPlanPath); kind "full"
+    pairs with a complete transform tree (needed for the tag-tier fallback,
+    which must compare tags across many candidate nodes); kind "skip"
+    means the plan had neither an index nor a tag match and was never run
+    against the test input.
     """
     index_tier = []
     tag_tier = []
 
-    for plan_idx, tree in enumerate(plansAppliedToTestInputMatrix):
+    for plan_idx, (kind, payload) in enumerate(plansAppliedToTestInputMatrix):
         plan = planAssignments[plan_idx]
-        paths = index_matches[plan_idx] if plan_idx < len(index_matches) else []
-        if paths:
-            for path in paths:
-                node = get_node_at_path(tree, path)
+
+        if kind == "index":
+            for path, replayed_root in payload:
+                node = get_node_at_path(replayed_root, path)
                 if node is not None and node.result is not None:
                     index_tier.append((node.result, {"match_type": "index", "plan": plan, "path": path}))
             continue
 
+        if kind == "skip":
+            continue
+
+        tree = payload  # kind == "full"
         tags_for_plan = set(tag_matches[plan_idx]) if plan_idx < len(tag_matches) else set()
         if not tags_for_plan:
             continue
@@ -417,23 +429,44 @@ class ArcAgent:
         # Step 6 - Case Based Solutions (skipped for now. may implment later)
 
         # Step 7 - Apply Plans to Test Input
+        #
+        # Plans with an index match only need the single tree node their
+        # matched path resolves to on the test input, so replayPlanPath
+        # rebuilds just that lineage instead of the full multi-branch tree.
+        # Plans with only a tag match still need a full tree (the tag-tier
+        # fallback compares tags across many candidate nodes). Plans with
+        # neither never get read by applyAndSort, so they're skipped
+        # entirely.
         step7_start = time.perf_counter()
         testInputMatrix = arc_problem.test_set().get_input_data().data()
         plansAppliedToTestInputMatrix = []
-        for plan in planAssignments:
+        last_test_trees = []
+        for plan_idx, plan in enumerate(planAssignments):
             plan_start = time.perf_counter()
-            plansAppliedToTestInputMatrix.append(performPlan(testInputMatrix, plan, None, shared_output_dims))
+            paths = index_matches[plan_idx] if plan_idx < len(index_matches) else []
+            tags_for_plan = tag_matches[plan_idx] if plan_idx < len(tag_matches) else []
+
+            if paths:
+                replayed = [(path, replayPlanPath(testInputMatrix, plan, path, shared_output_dims)) for path in paths]
+                plansAppliedToTestInputMatrix.append(("index", replayed))
+                last_test_trees.extend((plan, root) for _, root in replayed)
+            elif tags_for_plan:
+                tree = performPlan(testInputMatrix, plan, None, shared_output_dims)
+                plansAppliedToTestInputMatrix.append(("full", tree))
+                last_test_trees.append((plan, tree))
+            else:
+                plansAppliedToTestInputMatrix.append(("skip", None))
+
             dbg(f"{arc_problem.problem_name()}: [test] plan '{plan}' took {(time.perf_counter() - plan_start) * 1000:.1f} ms")
 
         dbg(f"{arc_problem.problem_name()}: step 7 (apply plans to test input) total {(time.perf_counter() - step7_start) * 1000:.1f} ms")
 
-        self.last_test_trees = list(zip(planAssignments, plansAppliedToTestInputMatrix))
+        self.last_test_trees = last_test_trees
 
         # Step 8 - Apply top matches to plans
         step8_start = time.perf_counter()
         all_predictions_from_highest_to_lowest_quality = applyAndSort(
             plansAppliedToTestInputMatrix,
-            index_matches,
             tag_matches,
             planAssignments
         )
