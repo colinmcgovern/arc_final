@@ -8,7 +8,7 @@ from ArcProblem import ArcProblem
 from ArcData import ArcData
 from ArcSet import ArcSet
 from runPlan import runPlan, replayPlanPath, iter_nodes_with_paths, get_node_at_path
-from runTransformation import _count_lines_by_direction
+from runTransformation import _count_lines_by_direction, _find_donuts
 
 ARC_DEBUG = os.environ.get("ARC_DEBUG", "1") != "0"
 
@@ -27,32 +27,38 @@ def makePlanAssignments(
     outputHasMoreLines,
     isDivisionCombine,
     possibleReflection,
-    possibleBlobReflection
+    possibleBlobReflection,
+    inputHasDonut
 ):
     print("outputHasMoreLines", outputHasMoreLines)
     print("isDivisionCombine", isDivisionCombine)
     print("possibleReflection", possibleReflection)
     print("possibleBlobReflection", possibleBlobReflection)
-    plansToExecute = ["donut_recoloring"]
-    # plansToExecute = []
-    # plansToExecute.append("general")
-    # plansToExecute.append("dialate_inscribe")
-    # plansToExecute.append("make_graph")
-    # if (
-    #     outputHasMoreLines == True
-    # ):
-    #     plansToExecute.append("draw_lines_between_blobs")
-    #     plansToExecute.append("draw_lines_drawable_directions")
-    # if (
-    #     isDivisionCombine == True
-    # ):
-    #     plansToExecute.append("divide_combine")
-    # if (
-    #     possibleReflection == True
-    # ):
-    #     plansToExecute.append("reflections")
-    # if possibleBlobReflection == True:
-    #     plansToExecute.append("blob_reflections")
+    print("inputHasDonut", inputHasDonut)
+
+    plansToExecute = []
+    plansToExecute.append("general")
+    plansToExecute.append("dialate_inscribe")
+    plansToExecute.append("make_graph")
+    if (
+        inputHasDonut == True
+    ):
+        plansToExecute.append("donut_recoloring")
+    if (
+        outputHasMoreLines == True
+    ):
+        plansToExecute.append("draw_lines_between_blobs")
+        plansToExecute.append("draw_lines_drawable_directions")
+    if (
+        isDivisionCombine == True
+    ):
+        plansToExecute.append("divide_combine")
+    if (
+        possibleReflection == True
+    ):
+        plansToExecute.append("reflections")
+    if possibleBlobReflection == True:
+        plansToExecute.append("blob_reflections")
     print("plansToExecute", plansToExecute)
     return plansToExecute
 
@@ -76,6 +82,17 @@ def findIfOutputsHasMoreLines(arc_problem: ArcProblem) -> bool:
     """
     return any(
         _count_lines(example.get_output_data().data()) > _count_lines(example.get_input_data().data())
+        for example in arc_problem.training_set()
+    )
+
+
+def findIfInputHasDonut(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if at least one training input contains a donut
+    (a single-color blob that fully encloses a hole).
+    """
+    return any(
+        len(_find_donuts(example.get_input_data().data())) > 0
         for example in arc_problem.training_set()
     )
 
@@ -363,6 +380,7 @@ class ArcAgent:
         outputHasMoreLines = findIfOutputsHasMoreLines(arc_problem)
         isDivisionCombine = findIfIsDivisionCombine(arc_problem)
         possibleReflection = findPossibleReflection(arc_problem)
+        inputHasDonut = findIfInputHasDonut(arc_problem)
         possibleBlobReflection = False #findPossibleBlobReflection(arc_problem)
         shared_output_dims = _shared_output_dimensions(arc_problem)
 
@@ -371,7 +389,8 @@ class ArcAgent:
             outputHasMoreLines,
             isDivisionCombine,
             possibleReflection,
-            possibleBlobReflection
+            possibleBlobReflection,
+            inputHasDonut
         )
 
         # Step 3 - Apply Plans
@@ -462,6 +481,15 @@ class ArcAgent:
         dbg(f"{arc_problem.problem_name()}: step 7 (apply plans to test input) total {(time.perf_counter() - step7_start) * 1000:.1f} ms")
 
         self.last_test_trees = last_test_trees
+
+        last_train_trees_by_example = []
+        for example_idx in range(len(arc_problem.training_set())):
+            example_trees = [
+                (plan, transformTreesForEveryInputMatrix[plan_idx][example_idx][0])
+                for plan_idx, plan in enumerate(planAssignments)
+            ]
+            last_train_trees_by_example.append(example_trees)
+        self.last_train_trees_by_example = last_train_trees_by_example
 
         # Step 8 - Apply top matches to plans
         step8_start = time.perf_counter()

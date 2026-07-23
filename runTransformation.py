@@ -600,7 +600,8 @@ def inscribe(input_matrix: np.ndarray, parameters: list):
 
 # This function recolors only one donut at a time from in input matrix
 # and outputs the new color for each of the possible colors
-# if there is more than one donut then only recolor one at a time 
+# if a donut has colors within it's frame then also recolor to the most
+# common color within the frame also
 # ensure that tags capture if the donut is recolored to the most common
 # color within the donut and other donut related fields
 # example 1
@@ -630,51 +631,106 @@ def inscribe(input_matrix: np.ndarray, parameters: list):
 # 1 1 1 0 1 1 1
 
 # output
-# 1 1 1 0 1 1 1
-# 1 0 1 0 1 0 1
-# 1 1 1 0 1 1 1
+# 2 2 2 0 2 2 2
+# 2 0 2 0 2 0 2
+# 2 2 2 0 2 2 2
 
 # ...
 
-# 9 9 9 0 1 1 1
-# 9 0 9 0 1 0 1
-# 9 9 9 0 1 1 1
+# 9 9 9 0 9 9 9
+# 9 0 9 0 9 0 9
+# 9 9 9 0 9 9 9
 
-# 1 1 1 0 2 2 2
-# 1 0 1 0 2 0 2
-# 1 1 1 0 2 2 2
+# example 3
+
+# input
+# 1 1 1 1 0 1 1 1 1 1
+# 1 0 0 1 0 1 0 2 0 1
+# 1 0 2 1 0 1 3 0 3 1
+# 1 1 1 1 0 1 1 1 1 1
+
+# output
+# 2 2 2 2 0 3 3 3 3 3
+# 2 0 0 2 0 3 0 2 0 3
+# 2 0 2 2 0 3 3 0 3 3
+# 2 2 2 2 0 3 3 3 3 3
+
+# 1 1 1 1 0 1 1 1 1 1
+# 1 0 0 1 0 1 0 2 0 1
+# 1 0 2 1 0 1 3 0 3 1
+# 1 1 1 1 0 1 1 1 1 1
 # ...
-# 1 1 1 0 9 9 9
-# 1 0 1 0 9 0 9
-# 1 1 1 0 9 9 9
-def recolor_a_donut_frame(input_matrix: np.ndarray, parameters: list):
+# 9 9 9 9 0 9 9 9 9 9
+# 9 0 0 9 0 9 0 2 0 9
+# 9 0 2 9 0 9 3 0 3 9
+# 9 9 9 9 0 9 9 9 9 9
+
+# example 4
+
+# input
+# 3 3 3 3 3 3 3
+# 3 0 0 3 0 3 0
+# 3 3 3 3 3 3 3
+
+# output
+# 1 1 1 1 1 1 1
+# 1 0 0 1 0 1 0
+# 1 1 1 1 1 1 1
+# ...
+# 9 9 9 9 9 9 9
+# 9 0 0 9 0 9 0
+# 9 9 9 9 9 9 9
+def recolor_donut_frames(input_matrix: np.ndarray, parameters: list):
     """
-    For each donut (a single-color frame blob fully enclosing a hole, see
-    _find_donuts), recolors just that donut's frame, once per candidate
-    color 0-9, leaving any other donuts untouched. Tags note the donut's
-    original/new color and whether the new color matches the most common
-    color within the donut's interior. Donuts are detected once from the
-    puzzle's root input matrix (see parameters/root_geometry).
+    Recolors every donut's frame at once, once per candidate color 0-9 (all
+    donuts get the same new color in a given output). If at least one donut's
+    interior contains a non-background color, an extra output is added where
+    each donut's frame is independently recolored to its own most-common
+    interior color. Donuts are detected once from the puzzle's root input
+    matrix (see parameters/root_geometry).
     """
     donuts = parameters["donuts"]
     result = []
     tags_list = []
-    for i, donut in enumerate(donuts):
-        for new_color in range(10):
-            out = input_matrix.copy()
+
+    donut_original_colors = [d["border_color"] for d in donuts]
+    donut_most_common_colors = [d["most_common_color"] for d in donuts]
+
+    for new_color in range(10):
+        out = input_matrix.copy()
+        for donut in donuts:
             out[donut["border_mask"]] = new_color
-            result.append(out)
-            tags_list.append({
-                "donut_original_color": donut["border_color"],
-                "donut_new_color": new_color,
-                "donut_most_common_interior_color": donut["most_common_color"],
-                "recolored_to_most_common_color": bool(new_color == donut["most_common_color"]),
-                "num_donuts_in_matrix": len(donuts),
-                "donut_index": i,
-            })
+        result.append(out)
+        tags_list.append({
+            "donut_original_colors": donut_original_colors,
+            "donut_new_color": new_color,
+            "donut_most_common_interior_colors": donut_most_common_colors,
+            "recolored_to_most_common_color": bool(
+                all(new_color == c for c in donut_most_common_colors)
+            ),
+            "used_most_common_mode": False,
+            "num_donuts_in_matrix": len(donuts),
+        })
+
+    if any(c != 0 for c in donut_most_common_colors):
+        out = input_matrix.copy()
+        for donut in donuts:
+            out[donut["border_mask"]] = donut["most_common_color"]
+        result.append(out)
+        tags_list.append({
+            "donut_original_colors": donut_original_colors,
+            "donut_new_color": None,
+            "donut_most_common_interior_colors": donut_most_common_colors,
+            "recolored_to_most_common_color": True,
+            "used_most_common_mode": True,
+            "num_donuts_in_matrix": len(donuts),
+        })
+
     return result, tags_list
 
-# This function the interior of a donut, one at a time
+# This function the interiors of all donut
+# If a donut has colors within it, then also output the most
+# the donuts colored with the most common color within it
 # Ensure that tags capture if the donut is recolored to the most common
 # color in the frame before recoloring, fill color matches frame color, and other donut related information
 # example 1
@@ -698,60 +754,84 @@ def recolor_a_donut_frame(input_matrix: np.ndarray, parameters: list):
 # 1 9 9 1
 # 1 1 1 1
 
+# 1 1 1 1
+# 1 2 2 1
+# 1 2 2 1
+# 1 1 1 1
+
 # example 2
 
 # input
 # 1 1 1 0 2 2 2
 # 1 0 1 0 2 0 2
 # 1 1 1 0 2 2 2
+# 0 0 0 0 0 0 0
+# 0 0 1 1 0 0 0
 
 # outputs
 # 1 1 1 0 2 2 2
-# 1 0 1 0 2 0 2
+# 1 1 1 0 2 1 2
 # 1 1 1 0 2 2 2
-
-# 1 1 1 0 2 2 2
-# 1 1 1 0 2 0 2
-# 1 1 1 0 2 2 2
+# 0 0 0 0 0 0 0
+# 0 0 1 1 0 0 0
 # ...
 # 1 1 1 0 2 2 2
-# 1 9 1 0 2 0 2
+# 1 9 1 0 2 9 2
 # 1 1 1 0 2 2 2
-
-# 1 1 1 0 2 2 2
-# 1 0 1 0 2 0 2
-# 1 1 1 0 2 2 2
-# ...
-# 1 1 1 0 2 2 2
-# 1 0 1 0 2 9 2
-# 1 1 1 0 2 2 2
-def recolor_a_donut_interior(input_matrix: np.ndarray, parameters: list):
+# 0 0 0 0 0 0 0
+# 0 0 1 1 0 0 0
+def recolor_donut_interiors(input_matrix: np.ndarray, parameters: list):
     """
-    For each donut (see _find_donuts), recolors just that donut's interior,
-    once per candidate color 0-9, leaving the frame and any other donuts
-    untouched. Tags note the donut's frame color, the interior's most common
-    color before recoloring, the new fill color, whether the fill matches
-    the most common interior color, and whether it matches the frame color.
-    Donuts are detected once from the puzzle's root input matrix (see
-    parameters/root_geometry).
+    Recolors every donut's interior at once, once per candidate color 0-9
+    (all donuts get the same new interior color in a given output). If at
+    least one donut's interior contains a non-background color, an extra
+    output is added where each donut's interior is independently recolored
+    to its own most-common interior color. Donuts are detected once from the
+    puzzle's root input matrix (see parameters/root_geometry).
     """
     donuts = parameters["donuts"]
     result = []
     tags_list = []
-    for i, donut in enumerate(donuts):
-        for new_color in range(10):
-            out = input_matrix.copy()
+
+    donut_frame_colors = [d["border_color"] for d in donuts]
+    donut_most_common_colors = [d["most_common_color"] for d in donuts]
+
+    for new_color in range(10):
+        out = input_matrix.copy()
+        for donut in donuts:
             out[donut["interior_mask"]] = new_color
-            result.append(out)
-            tags_list.append({
-                "donut_frame_color": donut["border_color"],
-                "donut_new_interior_color": new_color,
-                "donut_most_common_interior_color": donut["most_common_color"],
-                "recolored_to_most_common_color": bool(new_color == donut["most_common_color"]),
-                "fill_color_matches_frame_color": bool(new_color == donut["border_color"]),
-                "num_donuts_in_matrix": len(donuts),
-                "donut_index": i,
-            })
+        result.append(out)
+        tags_list.append({
+            "donut_frame_colors": donut_frame_colors,
+            "donut_new_interior_color": new_color,
+            "donut_most_common_interior_colors": donut_most_common_colors,
+            "recolored_to_most_common_color": bool(
+                all(new_color == c for c in donut_most_common_colors)
+            ),
+            "fill_color_matches_frame_colors": bool(
+                all(new_color == c for c in donut_frame_colors)
+            ),
+            "used_most_common_mode": False,
+            "num_donuts_in_matrix": len(donuts),
+        })
+
+    if any(c != 0 for c in donut_most_common_colors):
+        out = input_matrix.copy()
+        for donut in donuts:
+            out[donut["interior_mask"]] = donut["most_common_color"]
+        result.append(out)
+        tags_list.append({
+            "donut_frame_colors": donut_frame_colors,
+            "donut_new_interior_color": None,
+            "donut_most_common_interior_colors": donut_most_common_colors,
+            "recolored_to_most_common_color": True,
+            "fill_color_matches_frame_colors": bool(
+                all(m == f for m, f in zip(donut_most_common_colors, donut_frame_colors))
+            ),
+            "used_most_common_mode": True,
+            "num_donuts_in_matrix": len(donuts),
+        })
+
     return result, tags_list
 
 
@@ -1277,8 +1357,8 @@ TRANSFORMATION_FUNCTIONS = {
     "make_graph": make_graph,
     "fill_blobs": fill_blobs,
     "recolor_donuts": recolor_donuts,
-    "recolor_a_donut_frame": recolor_a_donut_frame,
-    "recolor_a_donut_interior": recolor_a_donut_interior,
+    "recolor_donut_frames": recolor_donut_frames,
+    "recolor_donut_interiors": recolor_donut_interiors,
     "reflect_over_lines": reflect_over_lines,
     "remove_touching": remove_touching,
     "apply_original_input": apply_original_input,

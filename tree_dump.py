@@ -3,14 +3,14 @@ import os
 from runPlan import iter_nodes_with_paths
 
 
-def write_tree_dump(problem_name, plan_trees, output_dir, timestamp):
+def write_tree_dump(problem_name, plan_trees, output_dir, timestamp, suffix):
     """
     Writes the full transform tree (every node, not just leaves) for each
     (plan_name, tree_root) pair in plan_trees to
-    <output_dir>/<problem_name>_<timestamp>.txt.
+    <output_dir>/<timestamp>_<problem_name>_<suffix>.txt.
     """
     os.makedirs(output_dir, exist_ok=True)
-    out_path = os.path.join(output_dir, f"{problem_name}_{timestamp}.txt")
+    out_path = os.path.join(output_dir, f"{timestamp}_{problem_name}_{suffix}.txt")
 
     with open(out_path, "w") as f:
         f.write(f"\n=== {problem_name} : plans executed = {[plan for plan, _ in plan_trees]} ===\n")

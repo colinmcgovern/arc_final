@@ -170,13 +170,13 @@
         "unique_output_tags": []
     },
     {
-        "name": "recolor_a_donut_frame",
+        "name": "recolor_donut_frames",
         "parameters": [],
         "canBeBackToBack": true,
         "unique_output_tags": ["donut_original_color", "donut_new_color", "donut_most_common_interior_color", "recolored_to_most_common_color", "num_donuts_in_matrix", "donut_index"]
     },
     {
-        "name": "recolor_a_donut_interior",
+        "name": "recolor_donut_interiors",
         "parameters": [],
         "canBeBackToBack": true,
         "unique_output_tags": ["donut_frame_color", "donut_new_interior_color", "donut_most_common_interior_color", "recolored_to_most_common_color", "fill_color_matches_frame_color", "num_donuts_in_matrix", "donut_index"]
