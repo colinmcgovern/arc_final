@@ -433,14 +433,18 @@ def _find_donuts(matrix: np.ndarray) -> list:
     """
     Finds "donuts": single-color 4-connected blobs (frames) that fully
     enclose a hole (per ndimage.binary_fill_holes - a hole touching the
-    outer grid edge is not enclosed). A frame's enclosed interior may
-    contain a mix of colors, not just background 0; color_counts and
-    most_common_color only reflect those interior cells, never the frame.
+    outer grid edge is not enclosed). The background color is detected
+    dynamically as the most frequent color in the matrix (not assumed to
+    be 0) and excluded from border-color candidates. A frame's enclosed
+    interior may contain a mix of colors, not just the background;
+    color_counts and most_common_color only reflect those interior cells,
+    never the frame.
     """
+    background_color = Counter(int(v) for v in matrix.flatten()).most_common(1)[0][0]
     donuts = []
     for color in np.unique(matrix):
         color = int(color)
-        if color == 0:
+        if color == background_color:
             continue
         mask = (matrix == color)
         labeled, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
@@ -463,6 +467,7 @@ def _find_donuts(matrix: np.ndarray) -> list:
                 "interior_coords": list(zip(*np.where(interior_mask))),
                 "color_counts": color_counts,
                 "most_common_color": most_common_color,
+                "background_color": background_color,
             })
     return donuts
 
@@ -712,7 +717,7 @@ def recolor_donut_frames(input_matrix: np.ndarray, parameters: list):
             "num_donuts_in_matrix": len(donuts),
         })
 
-    if any(c != 0 for c in donut_most_common_colors):
+    if any(c != d["background_color"] for c, d in zip(donut_most_common_colors, donuts)):
         out = input_matrix.copy()
         for donut in donuts:
             out[donut["border_mask"]] = donut["most_common_color"]
@@ -815,7 +820,7 @@ def recolor_donut_interiors(input_matrix: np.ndarray, parameters: list):
             "num_donuts_in_matrix": len(donuts),
         })
 
-    if any(c != 0 for c in donut_most_common_colors):
+    if any(c != d["background_color"] for c, d in zip(donut_most_common_colors, donuts)):
         out = input_matrix.copy()
         for donut in donuts:
             out[donut["interior_mask"]] = donut["most_common_color"]
