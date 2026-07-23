@@ -457,7 +457,11 @@ def _find_donuts(matrix: np.ndarray) -> list:
             color_counts = {c: 0 for c in range(10)}
             for c in matrix[interior_mask]:
                 color_counts[int(c)] += 1
-            most_common_color = max(color_counts, key=lambda c: (color_counts[c], -c))
+            non_bg_counts = {c: n for c, n in color_counts.items() if c != background_color and n > 0}
+            if non_bg_counts:
+                most_common_color = max(non_bg_counts, key=lambda c: (non_bg_counts[c], -c))
+            else:
+                most_common_color = background_color
 
             donuts.append({
                 "border_color": color,
@@ -1339,6 +1343,60 @@ def palette_rotation(input_matrix: np.ndarray, parameters: list):
     return _generate_palette_rotations([input_matrix])
 
 
+# this function detects the background color a a matrix and
+# generates a background color for each of the possible colors
+# example
+
+# input
+# 0 0 0 0
+# 0 1 0 0
+# 0 0 0 0
+
+# output
+# 0 0 0 0
+# 0 1 0 0
+# 0 0 0 0
+# ...
+# 9 9 9 9
+# 9 1 9 9
+# 9 9 9 9
+def recolor_background(input_matrix: np.ndarray, parameters: list):
+    """
+    Detects the background color (the most frequent color in input_matrix)
+    and generates one candidate output per color 0-9, with every background
+    pixel repainted to that candidate color.
+    """
+    background_color = Counter(int(v) for v in input_matrix.flatten()).most_common(1)[0][0]
+    result = []
+    for new_color in range(10):
+        out = input_matrix.copy()
+        out[input_matrix == background_color] = new_color
+        result.append(out)
+    return result
+
+
+def remove_small_blobs(input_matrix: np.ndarray, parameters: list):
+    """
+    Zeroes out every non-background 4-connected blob of size 1 (an isolated
+    single pixel). Background color is detected dynamically as the most
+    frequent color in input_matrix (see recolor_background/_find_donuts),
+    not assumed to be 0. Larger blobs are left unchanged.
+    """
+    background_color = Counter(int(v) for v in input_matrix.flatten()).most_common(1)[0][0]
+    output = input_matrix.copy()
+    for color in np.unique(input_matrix):
+        color = int(color)
+        if color == background_color:
+            continue
+        mask = input_matrix == color
+        labeled, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
+        for label_id in range(1, n_features + 1):
+            blob_mask = labeled == label_id
+            if blob_mask.sum() == 1:
+                output[blob_mask] = background_color
+    return output
+
+
 TRANSFORMATION_FUNCTIONS = {
     "reflection": reflection,
     "rotation": rotation,
@@ -1364,8 +1422,10 @@ TRANSFORMATION_FUNCTIONS = {
     "recolor_donuts": recolor_donuts,
     "recolor_donut_frames": recolor_donut_frames,
     "recolor_donut_interiors": recolor_donut_interiors,
+    "recolor_background": recolor_background,
     "reflect_over_lines": reflect_over_lines,
     "remove_touching": remove_touching,
+    "remove_small_blobs": remove_small_blobs,
     "apply_original_input": apply_original_input,
     "generate_all_color_combos": generate_all_color_combos,
     "palette_rotation": palette_rotation,
