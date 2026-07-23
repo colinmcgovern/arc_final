@@ -91,7 +91,7 @@ if __name__ == "__main__":
     # TEST_PROBLEM_HASH = ["25d487eb", "5c0a986e"] # Draw Lines Drawable Directions
     # TEST_PROBLEM_HASH = ["81c0276b", "9af7a82c", "c8b7cc0f"] # Make Graph
     # TEST_PROBLEM_HASH = ["18419cfa", "f8a8fe49"] # Blob Reflections
-    # TEST_PROBLEM_HASH = ["d931c21c", "ce22a75a"] # Dialate Inscribe
+    TEST_PROBLEM_HASH = ["d931c21c", "ce22a75a"] # Dialate Inscribe
     # TEST_PROBLEM_HASH = ["4b6b68e5", "7b6016b9", "b2862040"] # Donuts
     # TEST_PROBLEM_HASH = ["f76d97a5", "ed36ccf7", "b1948b0a", "1cf80156"] # General
 
