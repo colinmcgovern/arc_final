@@ -26,9 +26,9 @@ def run_training_data(agent: ArcAgent, arc_problems: list[ArcProblem], timestamp
         preds: list[np.ndarray] = agent.make_predictions(trn_problem)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         flags = getattr(agent, "last_flags", {})
-        write_tree_dump(trn_problem.problem_name(), agent.last_test_trees, "see_outputs", timestamp, "test")
-        for example_idx, example_trees in enumerate(agent.last_train_trees_by_example, start=1):
-            write_tree_dump(trn_problem.problem_name(), example_trees, "see_outputs", timestamp, f"example_{example_idx}")
+        # write_tree_dump(trn_problem.problem_name(), agent.last_test_trees, "see_outputs", timestamp, "test")
+        # for example_idx, example_trees in enumerate(agent.last_train_trees_by_example, start=1):
+        #     write_tree_dump(trn_problem.problem_name(), example_trees, "see_outputs", timestamp, f"example_{example_idx}")
         problem_times.append((trn_problem.problem_name(), elapsed_ms, flags))
         correct = False
 

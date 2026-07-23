@@ -37,29 +37,28 @@ def makePlanAssignments(
     print("inputHasDonut", inputHasDonut)
 
     plansToExecute = []
+    plansToExecute.append("general")
     plansToExecute.append("dialate_inscribe")
-    # plansToExecute.append("general")
-    # plansToExecute.append("dialate_inscribe")
-    # plansToExecute.append("make_graph")
-    # if (
-    #     inputHasDonut == True
-    # ):
-    #     plansToExecute.append("donut_recoloring")
-    # if (
-    #     outputHasMoreLines == True
-    # ):
-    #     plansToExecute.append("draw_lines_between_blobs")
-    #     plansToExecute.append("draw_lines_drawable_directions")
-    # if (
-    #     isDivisionCombine == True
-    # ):
-    #     plansToExecute.append("divide_combine")
-    # if (
-    #     possibleReflection == True
-    # ):
-    #     plansToExecute.append("reflections")
-    # if possibleBlobReflection == True:
-    #     plansToExecute.append("blob_reflections")
+    plansToExecute.append("make_graph")
+    if (
+        inputHasDonut == True
+    ):
+        plansToExecute.append("donut_recoloring")
+    if (
+        outputHasMoreLines == True
+    ):
+        plansToExecute.append("draw_lines_between_blobs")
+        plansToExecute.append("draw_lines_drawable_directions")
+    if (
+        isDivisionCombine == True
+    ):
+        plansToExecute.append("divide_combine")
+    if (
+        possibleReflection == True
+    ):
+        plansToExecute.append("reflections")
+    if possibleBlobReflection == True:
+        plansToExecute.append("blob_reflections")
     print("plansToExecute", plansToExecute)
     return plansToExecute
 

@@ -55,7 +55,7 @@ ROOT_INPUT_TRANSFORMATIONS = {"apply_original_input", "crop_to_m_n_of_input_dim"
 # _compute_root_geometry in runTransformation.py) - fixed for the whole
 # plan run instead of re-detected from each node's own evolving matrix
 ROOT_GEOMETRY_TRANSFORMATIONS = {
-    "extract_blobs", "dialate", "inscribe",
+    "extract_blobs", "dialate", "dialate_only_donuts", "inscribe",
     "recolor_donut_frames", "recolor_donut_interiors", "make_graph",
 }
 

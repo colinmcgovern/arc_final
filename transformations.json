@@ -180,5 +180,11 @@
         "parameters": [],
         "canBeBackToBack": true,
         "unique_output_tags": ["donut_frame_color", "donut_new_interior_color", "donut_most_common_interior_color", "recolored_to_most_common_color", "fill_color_matches_frame_color", "num_donuts_in_matrix", "donut_index"]
+    },
+    {
+        "name": "dialate_only_donuts",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": []
     }
 ]

@@ -282,10 +282,11 @@
         "name": "dialate_inscribe",
         "transformation_rounds": [
             {
-                "num_times": 1,
+                "num_times": 2,
                 "transformations": [
                     "dialate",
                     "inscribe",
+                    "dialate_only_donuts",
                     "no_change"
                 ]
             },

@@ -419,6 +419,15 @@ def _compute_ring_mask(matrix, use_holes):
     return ring
 
 
+def _compute_donuts_dilate_ring_mask(donuts: list, shape: tuple) -> np.ndarray:
+    ring = np.zeros(shape, dtype=bool)
+    for donut in donuts:
+        blob_mask = donut["border_mask"]
+        dilated = ndimage.binary_dilation(blob_mask, structure=_RING_STRUCT)
+        ring |= dilated & ~blob_mask
+    return ring
+
+
 def _generate_ring_recolors(matrix_list, ring_mask):
     result = []
     for m in matrix_list:
@@ -483,12 +492,14 @@ def _compute_root_geometry(matrix: np.ndarray) -> dict:
     fixed geometry for the whole plan run instead of re-detecting blobs on
     whatever matrix a given search branch currently holds.
     """
+    donuts = _find_donuts(matrix)
     return {
         "same_color_blobs": _generate_list_of_same_color_blobs([matrix]),
         "extracted_colors": _generate_extracted_colors([matrix]),
         "dilate_ring_mask": _compute_ring_mask(matrix, use_holes=False),
         "inscribe_ring_mask": _compute_ring_mask(matrix, use_holes=True),
-        "donuts": _find_donuts(matrix),
+        "donuts": donuts,
+        "donuts_dilate_ring_mask": _compute_donuts_dilate_ring_mask(donuts, matrix.shape),
         "blob_counts": _color_blob_counts(matrix),
     }
 
@@ -575,29 +586,148 @@ def dialate(input_matrix: np.ndarray, parameters: list):
     """
     return _generate_ring_recolors([input_matrix], parameters["dilate_ring_mask"])
 
+# this transformation only dilates donuts
+
+# example 1
+
+# input
+
+# 0 0 0
+# 0 1 0
+# 0 0 0
+
+# output
+
+# 0 0 0
+# 0 1 0
+# 0 0 0
+
+# example 2
+
+# input
+
+# 0 0 0 0 0
+# 0 1 1 1 0
+# 0 1 0 1 0
+# 0 1 1 1 0
+
+# output
+
+# 0 0 0 0 0
+# 0 1 1 1 0
+# 0 1 0 1 0
+# 0 1 1 1 0
+# ...
+# 9 9 9 9 9
+# 9 1 1 1 9
+# 9 1 0 1 9
+# 9 1 1 1 9
+def dialate_only_donuts(input_matrix: np.ndarray, parameters: list):
+    """
+    Same as `dialate`, but the ring is restricted to blobs that are donuts
+    (frames that fully enclose a hole - see parameters/root_geometry). Blobs
+    that aren't donuts are left untouched.
+    """
+    return _generate_ring_recolors([input_matrix], parameters["donuts_dilate_ring_mask"])
+
 # input is a matrix and the output is multiple matrixes with a border drawn within each blob of each color
-# for example the input
-# 1110011111
-# 1010010001
-# 1110010001
-# 1110010001
-# 0000011111
+# example 1
 
-# would become
+# input
 
-# 1110011111
-# 1110011111
-# 1110011011
-# 1110011111
-# 0000011111
+# 1 1 1
+# 1 0 1
+# 1 1 1
+
+# output
+
+# 1 1 1
+# 1 0 1
+# 1 1 1
 
 # ...
 
-# 1110011111
-# 1910019991
-# 1110019091
-# 1110019991
-# 0000011111
+# 1 1 1
+# 1 9 1
+# 1 1 1
+
+# example 2
+
+# input
+
+# 3 3 3 3 3
+# 3 2 2 2 3
+# 3 2 0 2 3
+# 3 2 2 2 3
+# 3 3 3 3 3
+
+# output
+
+# 3 3 3 3 3
+# 3 2 2 2 3
+# 3 2 0 2 3
+# 3 2 2 2 3
+# 3 3 3 3 3
+
+# ...
+
+# 1 1 1 1 1
+# 1 2 2 2 1
+# 1 2 9 2 1
+# 1 2 2 2 1
+# 1 1 1 1 1
+
+# example 3
+
+# input 
+
+# 1 1 1 1 1 0 0 0 0 
+# 1 0 0 0 1 0 1 1 1 
+# 1 0 0 0 1 0 1 0 1
+# 1 0 0 0 1 0 1 0 1
+# 1 1 1 1 1 0 0 0 0
+
+# output
+
+# 1 1 1 1 1 0 0 0 0 
+# 1 0 0 0 1 0 1 1 1 
+# 1 0 0 0 1 0 1 0 1
+# 1 0 0 0 1 0 1 0 1
+# 1 1 1 1 1 0 0 0 0
+
+# ...
+
+# 1 1 1 1 1 0 0 0 0 
+# 1 9 9 9 1 0 1 1 1 
+# 1 9 0 9 1 0 1 0 1
+# 1 9 9 9 1 0 1 0 1
+# 1 1 1 1 1 0 0 0 0
+
+# example 4
+
+# input 
+
+# 1 1 1 1 1 0 0 0 0 
+# 1 0 0 0 1 0 1 1 1 
+# 1 0 0 0 1 0 1 0 1
+# 1 0 0 0 1 0 1 1 1
+# 1 1 1 1 1 0 0 0 0
+
+# output
+
+# 1 1 1 1 1 0 0 0 0 
+# 1 0 0 0 1 0 1 1 1 
+# 1 0 0 0 1 0 1 0 1
+# 1 0 0 0 1 0 1 1 1
+# 1 1 1 1 1 0 0 0 0
+
+# ...
+
+# 1 1 1 1 1 0 0 0 0 
+# 1 9 9 9 1 0 1 1 1 
+# 1 9 0 9 1 0 1 9 1
+# 1 9 9 9 1 0 1 1 1
+# 1 1 1 1 1 0 0 0 0
 def inscribe(input_matrix: np.ndarray, parameters: list):
     """
     For each same-color blob (excluding background 0), recolors the inner
@@ -1404,6 +1534,7 @@ TRANSFORMATION_FUNCTIONS = {
     "divide": divide,
     "triple_divide": triple_divide,
     "dialate": dialate,
+    "dialate_only_donuts": dialate_only_donuts,
     "inscribe": inscribe,
     "draw_line_between_points": draw_line_between_points,
     "draw_drawable_lines": draw_drawable_lines,
