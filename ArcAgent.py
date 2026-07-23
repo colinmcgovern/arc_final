@@ -35,15 +35,9 @@ def makePlanAssignments(
     print("possibleBlobReflection", possibleBlobReflection)
     plansToExecute = ["donut_recoloring"]
     # plansToExecute = []
-    # if (
-    #     outputHasMoreLines == False and
-    #     isDivisionCombine == False and
-    #     possibleReflection == False and
-    #     possibleBlobReflection == False
-    # ):
-    #     plansToExecute.append("general")
-    #     plansToExecute.append("dialate_inscribe")
-    #     plansToExecute.append("make_graph")
+    # plansToExecute.append("general")
+    # plansToExecute.append("dialate_inscribe")
+    # plansToExecute.append("make_graph")
     # if (
     #     outputHasMoreLines == True
     # ):
