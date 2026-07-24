@@ -85,18 +85,18 @@ if __name__ == "__main__":
 
     # TEST_PROBLEM_HASH = ["bbb1b8b6", "195ba7dc", "31d5ba1a", "e98196ab", "cf98881b"] # Divide Combine
     # TEST_PROBLEM_HASH = ["3428a4f5", "f2829549", "6430c8c4", "0520fde7"] # Divide Combine (needs to be generalized to handle n cases)
-    # TEST_PROBLEM_HASH = ["c48954c1", "f25ffba3", "62c24649"] # Reflections
+    # TEST_PROBLEM_HASH = ["c48954c1", "f25ffba3", "62c24649", "62c24649"] # Reflections
     # TEST_PROBLEM_HASH = ["bbb1b8b6", "195ba7dc", "31d5ba1a", "e98196ab", "cf98881b", "c48954c1", "f25ffba3"]
     # TEST_PROBLEM_HASH = ["992798f6", "f35d900a"] # Draw Lines Between Blobs
     # TEST_PROBLEM_HASH = ["25d487eb", "5c0a986e"] # Draw Lines Drawable Directions
     # TEST_PROBLEM_HASH = ["81c0276b", "9af7a82c", "c8b7cc0f"] # Make Graph
-    TEST_PROBLEM_HASH = ["18419cfa", "2546ccf6"] # Blob Reflections
+    # TEST_PROBLEM_HASH = ["18419cfa", "2546ccf6", "f8a8fe49"] # Blob Reflections
     # TEST_PROBLEM_HASH = ["d931c21c", "ce22a75a"] # Dialate Inscribe
     # TEST_PROBLEM_HASH = ["4b6b68e5", "7b6016b9", "b2862040"] # Donuts
     # TEST_PROBLEM_HASH = ["f76d97a5", "ed36ccf7", "b1948b0a", "1cf80156"] # General
 
     # TEST_PROBLEM_HASH = ["c48954c1"]
-    # TEST_PROBLEM_HASH = None
+    TEST_PROBLEM_HASH = None
 
     arc_milestone_problems: list[ArcProblem] = []
     for milestone_letter in ('B', 'C', 'D'):
