@@ -57,6 +57,7 @@ ROOT_INPUT_TRANSFORMATIONS = {"apply_original_input", "crop_to_m_n_of_input_dim"
 ROOT_GEOMETRY_TRANSFORMATIONS = {
     "extract_blobs", "dialate", "dialate_only_donuts", "inscribe",
     "recolor_donut_frames", "recolor_donut_interiors", "make_graph",
+    "reflect_each_blob",
 }
 
 # transformations that need the (rows, cols) shape shared by every training

@@ -65,7 +65,7 @@ def _generate_rotations(matrix_list):
 
 
 def _generate_list_of_same_color_blobs(matrix_list):
-    struct = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+    struct = np.ones((3, 3), dtype=int)
     result = []
     for m in matrix_list:
         blobs = []
@@ -362,7 +362,7 @@ def _generate_palette_rotations(matrix_list):
 
 
 _RING_STRUCT = np.ones((3, 3), dtype=int)
-_BLOB_STRUCT = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+_BLOB_STRUCT = np.ones((3, 3), dtype=int)
 
 
 def _color_pixel_counts(matrix: np.ndarray) -> dict:
@@ -546,6 +546,8 @@ def _find_sticks(matrix: np.ndarray) -> list:
                 "bbox": (int(rmin), int(rmax), int(cmin), int(cmax)),
                 "background_color": background_color,
             })
+            print(f"[stick] color={color} bbox=(rmin={rmin}, rmax={rmax}, cmin={cmin}, cmax={cmax}) "
+                  f"orientation={sticks[-1]['orientation']} length={long_axis} thickness={short_axis}")
     return sticks
 
 
@@ -590,6 +592,7 @@ def _compute_root_geometry(matrix: np.ndarray) -> dict:
         "donuts": donuts,
         "donuts_dilate_ring_mask": _compute_donuts_dilate_ring_mask(donuts, matrix.shape),
         "blob_counts": _color_blob_counts(matrix),
+        "sticks": _find_sticks(matrix),
     }
 
 
@@ -1718,15 +1721,18 @@ def reflect_each_blob(input_matrix: np.ndarray, parameters: list):
     For each non-background blob, generates one candidate output per
     reflection: across its own bounding-box edge (4 directions x distance
     0/1), and across every detected stick's centerline (perpendicular to
-    the stick's orientation, distance 0 only). A candidate is skipped
-    entirely if the reflected blob would land fully off-grid or would
-    overlap any existing non-background pixel; merely touching (4-adjacent)
-    non-background content is allowed and tagged.
+    the stick's orientation, distance 0 only). Sticks are detected once
+    from the puzzle's root input matrix (see parameters/root_geometry) and
+    applied onto the current input_matrix, the same way donuts/blobs are
+    handled elsewhere. A candidate is skipped entirely if the reflected
+    blob would land fully off-grid or would overlap any existing
+    non-background pixel; merely touching (4-adjacent) non-background
+    content is allowed and tagged.
     """
     background_color = Counter(int(v) for v in input_matrix.flatten()).most_common(1)[0][0]
     num_rows, num_cols = input_matrix.shape
     blobs = _find_blobs_with_bbox(input_matrix, background_color)
-    sticks = _find_sticks(input_matrix)
+    sticks = parameters["sticks"]
 
     result = []
     tags_list = []
@@ -1735,7 +1741,7 @@ def reflect_each_blob(input_matrix: np.ndarray, parameters: list):
         if not reflected_coords:
             return
         in_bounds = [(r, c) for r, c in reflected_coords if 0 <= r < num_rows and 0 <= c < num_cols]
-        if not in_bounds:
+        if len(in_bounds) != len(reflected_coords):
             return
         if any(input_matrix[r, c] != background_color for r, c in in_bounds):
             return
@@ -1753,6 +1759,8 @@ def reflect_each_blob(input_matrix: np.ndarray, parameters: list):
                 break
 
         out = input_matrix.copy()
+        for r, c in blob["coords"]:
+            out[r, c] = background_color
         for r, c in in_bounds:
             out[r, c] = blob["color"]
         result.append(out)

@@ -19,7 +19,7 @@ def dbg(msg):
 
 TAG_FALLBACK_CANDIDATES_PER_PLAN = 3
 
-_BLOB_STRUCT = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+_BLOB_STRUCT = np.ones((3, 3), dtype=int)
 
 FRONTIER_SIZE_LIMIT_BEFORE_REMOVING_NON_UNIQUE = 5000
 
@@ -38,8 +38,8 @@ def makePlanAssignments(
     print("inputHasDonut", inputHasDonut)
 
     plansToExecute = []
-    # plansToExecute.append("blob_reflections")
-    # plansToExecute.append("reflections")
+    plansToExecute.append("blob_reflections")
+    plansToExecute.append("reflections")
     plansToExecute.append("general")
     plansToExecute.append("dialate_inscribe")
     if (
@@ -63,8 +63,8 @@ def makePlanAssignments(
         possibleReflection == True
     ):
         plansToExecute.append("reflections")
-    if possibleBlobReflection == True:
-        plansToExecute.append("blob_reflections")
+    # if possibleBlobReflection == True:
+    #     plansToExecute.append("blob_reflections")
     print("plansToExecute", plansToExecute)
     return plansToExecute
 
