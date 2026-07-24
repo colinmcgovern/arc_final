@@ -186,5 +186,11 @@
         "parameters": [],
         "canBeBackToBack": true,
         "unique_output_tags": []
+    },
+    {
+        "name": "reflect_each_blob",
+        "parameters": [],
+        "canBeBackToBack": true,
+        "unique_output_tags": ["reflected_blob_color", "reflection_type", "reflection_direction", "reflection_distance", "reflection_stick_color", "touches_non_background", "distance_to_nearest_same_color_blob"]
     }
 ]

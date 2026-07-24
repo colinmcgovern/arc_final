@@ -225,47 +225,13 @@
             }
         ]
     },
-        {
-        "name": "reflections",
-        "transformation_rounds": [
-            {
-                "num_times": 3,
-                "transformations": [
-                    "recolor_donut_frames",
-                    "no_change"
-                ]
-            },
-            {
-                "num_times": 3,
-                "transformations": [
-                    "recolor_donut_interiors",
-                    "no_change"
-                ]
-            },
-            {
-                "num_times": 1,
-                "transformations": [
-                   "generate_all_color_combos",
-                   "palette_rotation",
-                   "no_change"
-                ]
-            }
-        ]
-    },
     {
         "name": "blob_reflections",
         "transformation_rounds": [
             {
-                "num_times": 4,
+                "num_times": 3,
                 "transformations": [
-                    "reflect_over_lines",
-                    "no_change"
-                ]
-            },
-            {
-                "num_times": 1,
-                "transformations": [
-                    "remove_touching",
+                    "reflect_each_blob",
                     "no_change"
                 ]
             },
@@ -294,7 +260,6 @@
                 "num_times": 1,
                 "transformations": [
                    "generate_all_color_combos",
-                   "palette_rotation",
                    "no_change"
                 ]
             }

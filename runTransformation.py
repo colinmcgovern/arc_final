@@ -485,6 +485,95 @@ def _find_donuts(matrix: np.ndarray) -> list:
     return donuts
 
 
+def _find_sticks(matrix: np.ndarray) -> list:
+    """
+    Finds "sticks": single-color 4-connected blobs whose bounding box is thin
+    (1 or 2 pixels along the short axis) and long (at least 4 pixels along the
+    long axis). Internal background (0) gaps inside the bounding box are
+    allowed as long as the colored pixels remain one connected component
+    (e.g. a hollow frame like a top row with gaps closed off by a solid
+    bottom row). A stick must not be orthogonally (4-neighbor) adjacent to
+    any color other than 0 and its own color; diagonal adjacency to another
+    color does not disqualify it. The background color is detected
+    dynamically as the most frequent color in the matrix and excluded from
+    stick-color candidates.
+    """
+    background_color = Counter(int(v) for v in matrix.flatten()).most_common(1)[0][0]
+    padded = np.pad(matrix, 1, mode="constant", constant_values=background_color)
+    neighbors = [
+        padded[:-2, 1:-1],
+        padded[2:, 1:-1],
+        padded[1:-1, :-2],
+        padded[1:-1, 2:],
+    ]
+
+    sticks = []
+    for color in np.unique(matrix):
+        color = int(color)
+        if color == background_color:
+            continue
+        mask = (matrix == color)
+        labeled, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
+        for label_id in range(1, n_features + 1):
+            blob_mask = labeled == label_id
+
+            rows = np.where(np.any(blob_mask, axis=1))[0]
+            cols = np.where(np.any(blob_mask, axis=0))[0]
+            rmin, rmax = rows[0], rows[-1]
+            cmin, cmax = cols[0], cols[-1]
+            height = int(rmax - rmin + 1)
+            width = int(cmax - cmin + 1)
+            long_axis = max(height, width)
+            short_axis = min(height, width)
+            if short_axis not in (1, 2) or long_axis < 4:
+                continue
+
+            touches_other = False
+            for neighbor in neighbors:
+                if np.any(blob_mask & (neighbor != background_color) & (neighbor != color)):
+                    touches_other = True
+                    break
+            if touches_other:
+                continue
+
+            sticks.append({
+                "color": color,
+                "mask": blob_mask,
+                "coords": list(zip(*np.where(blob_mask))),
+                "orientation": "horizontal" if width >= height else "vertical",
+                "length": long_axis,
+                "thickness": short_axis,
+                "bbox": (int(rmin), int(rmax), int(cmin), int(cmax)),
+                "background_color": background_color,
+            })
+    return sticks
+
+
+def _find_blobs_with_bbox(matrix: np.ndarray, background_color: int) -> list:
+    """
+    Enumerates every non-background 4-connected blob in matrix, with its
+    color, pixel coords, and bounding box (rmin, rmax, cmin, cmax).
+    """
+    blobs = []
+    for color in np.unique(matrix):
+        color = int(color)
+        if color == background_color:
+            continue
+        mask = (matrix == color)
+        labeled, n_features = ndimage.label(mask, structure=_BLOB_STRUCT)
+        for label_id in range(1, n_features + 1):
+            blob_mask = labeled == label_id
+            rows = np.where(np.any(blob_mask, axis=1))[0]
+            cols = np.where(np.any(blob_mask, axis=0))[0]
+            blobs.append({
+                "color": color,
+                "mask": blob_mask,
+                "coords": list(zip(*np.where(blob_mask))),
+                "bbox": (int(rows[0]), int(rows[-1]), int(cols[0]), int(cols[-1])),
+            })
+    return blobs
+
+
 def _compute_root_geometry(matrix: np.ndarray) -> dict:
     """
     Detects every blob/donut feature once, from the puzzle's root (pre-
@@ -1504,6 +1593,211 @@ def recolor_background(input_matrix: np.ndarray, parameters: list):
         result.append(out)
     return result
 
+# This takes each blob and reflects at a distance of 0 and 1.
+# It also reflects over every "stick" in the problem with a distance of 0
+# It must reflect in each direction in both the x and y direction
+
+# example 1
+
+# input
+# 1 0 0 0 0
+# 1 1 0 0 0
+# 1 0 0 0 0
+
+# outputs
+# 0 0 0 1 0
+# 0 0 1 1 0
+# 0 0 0 1 0
+
+# 0 0 0 0 1
+# 0 0 0 1 1
+# 0 0 0 0 1
+
+# 0 0 0 0 0 
+# 0 0 0 0 0 
+# 0 0 0 0 0
+
+# 0 0 0 0 0 
+# 0 0 0 0 0 
+# 0 0 0 0 0
+
+# 0 0 0 0 0 
+# 0 0 0 0 0 
+# 0 0 0 0 0
+
+# 0 0 0 0 0 
+# 0 0 0 0 0 
+# 0 0 0 0 0
+
+# 0 0 0 0 0 
+# 0 0 0 0 0 
+# 0 0 0 0 0
+
+# 0 0 0 0 0 
+# 0 0 0 0 0 
+# 0 0 0 0 0
+
+# example 2
+
+# input
+# 0 0 0 0 2 0 0
+# 0 0 1 0 2 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 0 0 0 1 2 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 0 0 0 0 1 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 1 0 2 0 0
+# 0 0 0 0 2 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 0 0 0 0 2 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 0 1 0 0 2 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 1 0 0 0 2 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 0 0 0 0 2 0 0
+# 0 0 1 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 0 0 0 0 2 0 0
+# 0 0 0 0 2 0 0
+
+# 0 0 0 0 2 0 0
+# 0 0 0 0 2 0 1
+# 0 0 0 0 2 0 0
+
+
+# 0 0 0 2 0 0 0
+# 0 0 1 2 0 0 0
+# 0 0 0 2 0 0 0
+
+# 0 0 2 0 0 0 0
+# 0 0 2 0 0 0 0
+# 0 0 2 0 0 0 0
+
+# 0 0 0 0 0 0 0
+# 0 0 1 0 0 0 0
+# 0 0 0 0 0 0 0
+
+# 0 0 0 0 0 0 0
+# 0 0 1 0 0 0 0
+# 0 0 0 0 0 0 0
+
+# 0 0 0 0 0 0 0
+# 0 0 1 0 0 0 0
+# 0 0 0 0 0 0 0
+
+# 0 0 0 0 0 0 0
+# 0 0 1 0 0 0 0
+# 0 0 0 0 0 0 0
+
+# 0 0 0 0 0 2 0
+# 0 0 1 0 0 2 0
+# 0 0 0 0 0 2 0
+
+# 0 0 0 0 0 0 2
+# 0 0 1 0 0 0 2
+# 0 0 0 0 0 0 2
+
+def reflect_each_blob(input_matrix: np.ndarray, parameters: list):
+    """
+    For each non-background blob, generates one candidate output per
+    reflection: across its own bounding-box edge (4 directions x distance
+    0/1), and across every detected stick's centerline (perpendicular to
+    the stick's orientation, distance 0 only). A candidate is skipped
+    entirely if the reflected blob would land fully off-grid or would
+    overlap any existing non-background pixel; merely touching (4-adjacent)
+    non-background content is allowed and tagged.
+    """
+    background_color = Counter(int(v) for v in input_matrix.flatten()).most_common(1)[0][0]
+    num_rows, num_cols = input_matrix.shape
+    blobs = _find_blobs_with_bbox(input_matrix, background_color)
+    sticks = _find_sticks(input_matrix)
+
+    result = []
+    tags_list = []
+
+    def emit(blob, reflected_coords, reflection_type, direction, distance, stick_color=None):
+        if not reflected_coords:
+            return
+        in_bounds = [(r, c) for r, c in reflected_coords if 0 <= r < num_rows and 0 <= c < num_cols]
+        if not in_bounds:
+            return
+        if any(input_matrix[r, c] != background_color for r, c in in_bounds):
+            return
+
+        in_bounds_set = set(in_bounds)
+        touches = False
+        for r, c in in_bounds:
+            for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+                if (nr, nc) in in_bounds_set:
+                    continue
+                if 0 <= nr < num_rows and 0 <= nc < num_cols and input_matrix[nr, nc] != background_color:
+                    touches = True
+                    break
+            if touches:
+                break
+
+        out = input_matrix.copy()
+        for r, c in in_bounds:
+            out[r, c] = blob["color"]
+        result.append(out)
+
+        other_blobs = [b for b in blobs if b["color"] == blob["color"] and b is not blob]
+        if other_blobs:
+            brmin, brmax, bcmin, bcmax = blob["bbox"]
+            dist = min(
+                max(
+                    max(0, max(bcmin - b["bbox"][3], b["bbox"][2] - bcmax)),
+                    max(0, max(brmin - b["bbox"][1], b["bbox"][0] - brmax)),
+                )
+                for b in other_blobs
+            )
+        else:
+            dist = -1
+
+        tags_list.append({
+            "reflected_blob_color": blob["color"],
+            "reflection_type": reflection_type,
+            "reflection_direction": direction,
+            "reflection_distance": distance,
+            "reflection_stick_color": stick_color,
+            "touches_non_background": touches,
+            "distance_to_nearest_same_color_blob": dist,
+        })
+
+    for blob in blobs:
+        rmin, rmax, cmin, cmax = blob["bbox"]
+        for distance in (0, 1):
+            emit(blob, [(r, 2 * cmax + 1 + distance - c) for r, c in blob["coords"]], "own_edge", "right", distance)
+            emit(blob, [(r, 2 * cmin - 1 - distance - c) for r, c in blob["coords"]], "own_edge", "left", distance)
+            emit(blob, [(2 * rmax + 1 + distance - r, c) for r, c in blob["coords"]], "own_edge", "down", distance)
+            emit(blob, [(2 * rmin - 1 - distance - r, c) for r, c in blob["coords"]], "own_edge", "up", distance)
+
+        for stick in sticks:
+            if stick["orientation"] == "vertical":
+                axis = stick["bbox"][2] + stick["bbox"][3]
+                emit(blob, [(r, axis - c) for r, c in blob["coords"]], "stick", "vertical_stick", 0, stick["color"])
+            else:
+                axis = stick["bbox"][0] + stick["bbox"][1]
+                emit(blob, [(axis - r, c) for r, c in blob["coords"]], "stick", "horizontal_stick", 0, stick["color"])
+
+    return result, tags_list
+
 
 def remove_small_blobs(input_matrix: np.ndarray, parameters: list):
     """
@@ -1557,6 +1851,7 @@ TRANSFORMATION_FUNCTIONS = {
     "reflect_over_lines": reflect_over_lines,
     "remove_touching": remove_touching,
     "remove_small_blobs": remove_small_blobs,
+    "reflect_each_blob": reflect_each_blob,
     "apply_original_input": apply_original_input,
     "generate_all_color_combos": generate_all_color_combos,
     "palette_rotation": palette_rotation,

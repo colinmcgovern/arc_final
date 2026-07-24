@@ -1,6 +1,8 @@
 import numpy as np
 from collections import Counter
 
+from ArcProblem import ArcProblem
+
 
 def _background_color(matrix):
     return Counter(int(v) for v in np.asarray(matrix).flatten()).most_common(1)[0][0]
@@ -90,6 +92,16 @@ def hasDottedLine(matrix):
                     if count >= 3:
                         return True
     return False
+
+
+def findIfAllInputsHaveDottedLine(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if every training input contains a dotted line.
+    """
+    return all(
+        hasDottedLine(example.get_input_data().data())
+        for example in arc_problem.training_set()
+    )
 
 
 # this finds if the input matrix has a curved line in it
@@ -205,6 +217,16 @@ def hasCurvedLine(matrix):
     return False
 
 
+def findIfAllInputsHaveCurvedLine(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if every training input contains a curved line.
+    """
+    return all(
+        hasCurvedLine(example.get_input_data().data())
+        for example in arc_problem.training_set()
+    )
+
+
 # this finds if the input matrix has a double color line
 
 # example 1
@@ -280,3 +302,13 @@ def hasDoubleColorLine(matrix):
         if _has_double_color_run(np.diag(flipped, d), bg):
             return True
     return False
+
+
+def findIfAllInputsHaveDoubleColorLine(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if every training input contains a double-color line.
+    """
+    return all(
+        hasDoubleColorLine(example.get_input_data().data())
+        for example in arc_problem.training_set()
+    )

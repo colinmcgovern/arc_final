@@ -28,7 +28,8 @@ def makePlanAssignments(
     isDivisionCombine,
     possibleReflection,
     possibleBlobReflection,
-    inputHasDonut
+    inputHasDonut,
+    inputHasConsistantSize
 ):
     print("outputHasMoreLines", outputHasMoreLines)
     print("isDivisionCombine", isDivisionCombine)
@@ -37,28 +38,32 @@ def makePlanAssignments(
     print("inputHasDonut", inputHasDonut)
 
     plansToExecute = []
-    plansToExecute.append("general")
-    plansToExecute.append("dialate_inscribe")
-    plansToExecute.append("make_graph")
-    if (
-        inputHasDonut == True
-    ):
-        plansToExecute.append("donut_recoloring")
-    if (
-        outputHasMoreLines == True
-    ):
-        plansToExecute.append("draw_lines_between_blobs")
-        plansToExecute.append("draw_lines_drawable_directions")
-    if (
-        isDivisionCombine == True
-    ):
-        plansToExecute.append("divide_combine")
-    if (
-        possibleReflection == True
-    ):
-        plansToExecute.append("reflections")
-    if possibleBlobReflection == True:
-        plansToExecute.append("blob_reflections")
+    plansToExecute.append("blob_reflections")
+    # plansToExecute.append("general")
+    # plansToExecute.append("dialate_inscribe")
+    # if (
+    #     inputHasConsistantSize == True
+    # ):
+    #     plansToExecute.append("make_graph")
+    # if (
+    #     inputHasDonut == True
+    # ):
+    #     plansToExecute.append("donut_recoloring")
+    # if (
+    #     outputHasMoreLines == True
+    # ):
+    #     plansToExecute.append("draw_lines_between_blobs")
+    #     plansToExecute.append("draw_lines_drawable_directions")
+    # if (
+    #     isDivisionCombine == True
+    # ):
+    #     plansToExecute.append("divide_combine")
+    # if (
+    #     possibleReflection == True
+    # ):
+    #     plansToExecute.append("reflections")
+    # if possibleBlobReflection == True:
+    #     plansToExecute.append("blob_reflections")
     print("plansToExecute", plansToExecute)
     return plansToExecute
 
@@ -96,6 +101,14 @@ def findIfInputHasDonut(arc_problem: ArcProblem) -> bool:
         for example in arc_problem.training_set()
     )
 
+# this takes in a arcproblem and outputs true if all of the output matrices 
+# for the examples are all the same size
+def findIfProblemHasConsistentOutputSize(arc_problem: ArcProblem) -> bool:
+    """
+    Returns True if every training example's output matrix has the
+    same shape (rows and columns).
+    """
+    return _shared_output_dimensions(arc_problem) is not None
 
 def _is_divider_line_set(arc_set: ArcSet) -> bool:
     input_shape = arc_set.get_input_data().shape()
@@ -381,6 +394,8 @@ class ArcAgent:
         possibleReflection = findPossibleReflection(arc_problem)
         inputHasDonut = findIfInputHasDonut(arc_problem)
         possibleBlobReflection = False #findPossibleBlobReflection(arc_problem)
+        inputHasConsistantSize = findIfProblemHasConsistentOutputSize(arc_problem)
+
         shared_output_dims = _shared_output_dimensions(arc_problem)
 
         # Step 1a - Find Line Types
@@ -392,7 +407,8 @@ class ArcAgent:
             isDivisionCombine,
             possibleReflection,
             possibleBlobReflection,
-            inputHasDonut
+            inputHasDonut,
+            inputHasConsistantSize
         )
 
         # Step 3 - Apply Plans
